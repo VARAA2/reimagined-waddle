@@ -1,8 +1,12 @@
 {
   "name": "n8n-nodes-nna-telegram-sender",
-  "version": "0.35.0",
+  "version": "0.35.1",
   "description": "Restricted Telegram personal-account history, operator replies and reaction copying",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VARAA2/reimagined-waddle.git"
+  },
   "keywords": [
     "n8n-community-node-package",
     "n8n",
