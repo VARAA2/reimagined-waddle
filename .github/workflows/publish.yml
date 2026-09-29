@@ -24,8 +24,9 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing needs npm 11.5.1 or newer.
-      - run: npm install -g npm@latest
+      # Trusted publishing needs npm 11.5.1 or newer. Stay on npm 11: npm 12 no longer accepts
+      # npm-shrinkwrap.json for `npm ci` (run 1 of this workflow failed there), and 11.x is what the tests ran on.
+      - run: npm install -g npm@11
 
       - run: npm ci
 
