@@ -1,0 +1,344 @@
+{
+  "version": 1,
+  "language": "en",
+  "targetCount": 15,
+  "maxNovel": 3,
+  "minimumConfidence": 0.8,
+  "tags": {
+    "Jesus": [
+      "JesusChrist",
+      "ChristJesus"
+    ],
+    "Christianity": [
+      "Christian"
+    ],
+    "Bible": [
+      "HolyBible",
+      "Biblical"
+    ],
+    "Gods": [
+      "God",
+      "Divine"
+    ],
+    "Spirituality": [
+      "Spiritual"
+    ],
+    "Devotion": [
+      "Devotional"
+    ],
+    "Faith": [],
+    "Prayer": [
+      "Prayers",
+      "Praying"
+    ],
+    "Compassion": [],
+    "Forgiveness": [],
+    "Love": [],
+    "Peace": [],
+    "Hope": [],
+    "Wisdom": [],
+    "Blessings": [
+      "Blessing"
+    ],
+    "Miracles": [
+      "Miracle"
+    ],
+    "Healing": [],
+    "Resurrection": [],
+    "Nativity": [],
+    "Crucifixion": [],
+    "Hinduism": [
+      "Hindu"
+    ],
+    "Vishnu": [
+      "LordVishnu",
+      "Narayana",
+      "Narayanan"
+    ],
+    "Perumal": [
+      "LordPerumal"
+    ],
+    "Krishna": [
+      "LordKrishna",
+      "Krsna"
+    ],
+    "Rama": [
+      "LordRama",
+      "Ram"
+    ],
+    "Shiva": [
+      "LordShiva",
+      "Siva"
+    ],
+    "Murugan": [
+      "LordMurugan",
+      "Muruga"
+    ],
+    "Ganesha": [
+      "Ganesh",
+      "Vinayagar"
+    ],
+    "Lakshmi": [
+      "GoddessLakshmi"
+    ],
+    "Saraswati": [
+      "GoddessSaraswati"
+    ],
+    "Vaishnavism": [
+      "Vaishnava"
+    ],
+    "Bhakti": [],
+    "BhagavadGita": [
+      "BhagwatGita"
+    ],
+    "Ramayana": [],
+    "Mahabharata": [],
+    "Temple": [
+      "Temples"
+    ],
+    "Worship": [],
+    "Puja": [
+      "Pooja"
+    ],
+    "Festival": [
+      "Festivals"
+    ],
+    "Meditation": [],
+    "SelfRealization": [
+      "SelfRealisation"
+    ],
+    "Surrender": [],
+    "Service": [],
+    "Gratitude": [],
+    "Nature": [],
+    "Art": [
+      "Artwork"
+    ],
+    "Music": [],
+    "Tamil": [],
+    "English": [],
+    "Teachings": [
+      "Teaching"
+    ],
+    "Quote": [
+      "Quotes"
+    ],
+    "History": [],
+    "Demigod": [
+      "Demigods"
+    ],
+    "Information": [
+      "Informative"
+    ],
+    "Awareness": [],
+    "Education": [
+      "Educational"
+    ],
+    "Learning": [],
+    "Students": [
+      "Student"
+    ],
+    "Children": [
+      "Kids"
+    ],
+    "Parenting": [],
+    "School": [],
+    "Science": [],
+    "Facts": [],
+    "Movies": [
+      "Movie",
+      "Cinema",
+      "Films",
+      "Film"
+    ],
+    "TamilCinema": [
+      "Kollywood"
+    ],
+    "MovieScene": [
+      "MovieScenes"
+    ],
+    "MovieDialogue": [
+      "MovieDialogues"
+    ],
+    "MovieSong": [
+      "MovieSongs"
+    ],
+    "Acting": [],
+    "Dance": [
+      "Dancing"
+    ],
+    "Entertainment": [],
+    "Comedy": [
+      "Funny",
+      "Humor",
+      "Humour"
+    ],
+    "Meme": [
+      "Memes"
+    ],
+    "Template": [
+      "Templates"
+    ],
+    "Relationships": [
+      "Relationship"
+    ],
+    "Happiness": [
+      "Happy"
+    ],
+    "Friendship": [],
+    "Family": [],
+    "Kindness": [],
+    "Motivation": [
+      "Motivational"
+    ],
+    "ToxicRelationship": [
+      "ToxicRelationships"
+    ],
+    "EmotionalAbuse": [],
+    "MentalHealth": [],
+    "Wellbeing": [],
+    "Culture": [
+      "Cultural"
+    ],
+    "Heritage": [],
+    "Tradition": [
+      "Traditions"
+    ],
+    "Archaeology": [],
+    "Architecture": [],
+    "Politics": [
+      "Political"
+    ],
+    "Government": [
+      "Govt"
+    ],
+    "PublicPolicy": [],
+    "Elections": [
+      "Election"
+    ],
+    "Society": [
+      "SocialIssues"
+    ],
+    "Community": [],
+    "SocialJustice": [],
+    "Technology": [
+      "Tech"
+    ],
+    "AI": [
+      "ArtificialIntelligence"
+    ],
+    "AIContent": [
+      "AIGenerated"
+    ],
+    "Software": [],
+    "Robotics": [],
+    "Innovation": [],
+    "SocialMedia": [],
+    "Internet": [],
+    "DigitalSafety": [],
+    "Privacy": [],
+    "News": [],
+    "Earth": [],
+    "Space": [],
+    "Universe": [],
+    "Astronomy": [],
+    "Environment": [],
+    "Climate": [],
+    "Aliens": [
+      "Alien",
+      "Extraterrestrial"
+    ],
+    "UFO": [
+      "UFOs"
+    ],
+    "Vehicle": [
+      "Vehicles"
+    ],
+    "Cars": [
+      "Car"
+    ],
+    "Motorcycles": [
+      "Motorcycle"
+    ],
+    "Driving": [],
+    "RoadSafety": [],
+    "Travel": [],
+    "Transport": [],
+    "Tobacco": [
+      "Tabacco"
+    ],
+    "Smoking": [],
+    "Health": [],
+    "Addiction": [],
+    "Crime": [],
+    "Abuse": [],
+    "Safety": [],
+    "Justice": [],
+    "Law": [],
+    "Food": [],
+    "Cooking": [],
+    "Recipe": [
+      "Recipes"
+    ],
+    "Nutrition": [],
+    "Business": [],
+    "Economics": [
+      "Economy"
+    ],
+    "Finance": [],
+    "Money": [],
+    "Entrepreneurship": [],
+    "SecretSociety": [
+      "SecretSocieties"
+    ],
+    "ConspiracyTheory": [
+      "ConspiracyTheories"
+    ],
+    "Sources": [
+      "Source"
+    ],
+    "Research": [],
+    "FactCheck": [
+      "FactChecking"
+    ],
+    "Animals": [
+      "Animal"
+    ],
+    "Wildlife": [],
+    "Pets": [
+      "Pet"
+    ],
+    "AnimalWelfare": [],
+    "Announcement": [
+      "Announcements"
+    ],
+    "Deities": [
+      "Deity"
+    ]
+  },
+  "notes": [
+    "Membership in this bank does not make a tag relevant. Every selected tag needs evidence.",
+    "Gods and Deities are the user-defined common search categories for Jesus, Krishna, Perumal and other depicted deities, not theological assertions.",
+    "Krishna, Vishnu and Perumal are related labels, not interchangeable aliases; select each only when supported.",
+    "Demigod is not an alias for Deity; use only when that specific classification is explicit in the supplied content.",
+    "This is an initial English bank informed by the user's examples and group topic names, not a complete content taxonomy. Topic membership alone is never evidence for a tag."
+  ],
+  "sharedCategories": {
+    "subjects": [
+      "Jesus",
+      "Vishnu",
+      "Perumal",
+      "Krishna",
+      "Rama",
+      "Shiva",
+      "Murugan",
+      "Ganesha",
+      "Lakshmi",
+      "Saraswati"
+    ],
+    "parents": [
+      "Gods",
+      "Deities"
+    ]
+  }
+}

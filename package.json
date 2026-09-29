@@ -1,0 +1,50 @@
+{
+  "name": "n8n-nodes-nna-telegram-sender",
+  "version": "0.35.0",
+  "description": "Restricted Telegram personal-account history, operator replies and reaction copying",
+  "license": "MIT",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "telegram",
+    "mtproto"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "npm-shrinkwrap.json"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "prepack": "npm test"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/NnaTelegramSender.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/NnaTelegramSender/NnaTelegramSender.node.js",
+      "dist/nodes/NnaTelegramMonitor/NnaTelegramMonitor.node.js",
+      "dist/nodes/NnaMediaCollection/NnaMediaCollection.node.js",
+      "dist/nodes/NnaPollStudio/NnaPollStudio.node.js",
+      "dist/nodes/NnaMediaReader/NnaMediaReader.node.js"
+    ]
+  },
+  "dependencies": {
+    "big-integer": "1.6.52",
+    "teleproto": "1.229.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "peerDependenciesMeta": {
+    "n8n-workflow": {
+      "optional": true
+    }
+  }
+}
