@@ -236,3 +236,6 @@ Tamil is the primary expected audio and summary language. Recognition guidance c
 Reply bot operators can use **🎙️ Audio Summary**, `/audiosummary`, or send a Telegram voice/audio message in private. Replying to audio with `/audiosummary` also works for authorized group administrators, in the same topic. `/cancelaudio` cancels a pending result. One recording is limited to 20 MB and 20 minutes; files are never silently truncated. Existing processing feedback remains unchanged.
 
 The NNA group reader accepts `action: "audio"` with an exact Telegram message URL for the two configured NNA groups. It validates the group, actual topic, sender metadata, audio attributes, byte format and limits before returning temporary binary data to Gemini. The ChatGPT adapter returns a complete timestamped transcript and summary for detailed explanation, not an audio player. Video is excluded. Sender metadata identifies the Telegram poster, not the speaker's voice. Gemini output must be complete and structurally valid; failures are not presented as empty or successful summaries.
+## Maintainer
+
+Maintained by [@VARAA2](https://github.com/VARAA2). Issues and pull requests are welcome.
