@@ -127,3 +127,9 @@ test('reply from another operator or to an unknown bot message never selects som
  const other=await s.handle(input(10,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}},43));assert.equal(other.json.status,'unsupported');assert.equal(s.store.read(keys[0]).status,'pending');
  await assert.rejects(s.handle(input(11,{text,reply_to_message:{message_id:5555,from:fromBot}})),/STALE_KEYBOARD/);assert.equal(sent.length,0);
 });
+test('hidden General is left out of the topic keyboard and the order list, closed topics stay listed',async t=>{
+ const s=setup(t);s.topics=async()=>[{id:1,title:'General',hidden:true,closed:true},{id:29,title:'Info'},{id:3845,title:'AESTHETIC AND EMOTION'},{id:50,title:'Old',closed:true}];
+ await s.handle(input(1,photo(1)));const ui=s.store.read('ui_42');
+ assert(!ui.choices.some(x=>x.action==='t1'));assert.deepEqual(ui.choices.filter(x=>x.action[0]==='t').map(x=>x.action),['t29','t3845','t50']);
+ await s.showOrder('42');assert.deepEqual(s.store.read('ui_42').topicIds,[29,3845,50]);
+});

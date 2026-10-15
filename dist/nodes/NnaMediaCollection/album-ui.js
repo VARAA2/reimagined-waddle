@@ -84,7 +84,8 @@ function install(Service,parseMedia){
  Service.prototype.addPending=function(d){this.store.change('pending_'+d.owner,old=>({keys:[d.key,...(old?.keys||[]).filter(k=>k!==d.key)].slice(0,100)}));};
  Service.prototype.pendingDrafts=function(owner){return (this.store.read('pending_'+owner)?.keys||[]).map(k=>this.store.read(k)).filter(d=>d&&d.owner===owner&&['pending','collecting','analysing'].includes(d.status));};
  Service.prototype.orderedTopics=async function(owner){
-  const topics=await this.personal(client=>this.topics(client));
+  // A hidden topic (the group's General) can never be posted to, so it is left out of the keyboard.
+  const topics=(await this.personal(client=>this.topics(client))).filter(t=>!t.hidden);
   const saved=this.store.read('topic_order_'+owner);
   const ids=(saved&&saved.orderRevision===this.scope.topicOrderRevision?saved.ids:this.scope.defaultTopicOrder)||[];
   const ordered=[...ids.map(id=>topics.find(t=>String(destinations.topicKey(t))===String(id))).filter(Boolean),...topics.filter(t=>!ids.some(id=>String(id)===String(destinations.topicKey(t))))];
