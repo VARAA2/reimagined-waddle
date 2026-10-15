@@ -133,3 +133,18 @@ test('hidden General is left out of the topic keyboard and the order list, close
  assert(!ui.choices.some(x=>x.action==='t1'));assert.deepEqual(ui.choices.filter(x=>x.action[0]==='t').map(x=>x.action),['t29','t3845','t50']);
  await s.showOrder('42');assert.deepEqual(s.store.read('ui_42').topicIds,[29,3845,50]);
 });
+test('Insta Saver carousel layout: video-only and mixed albums keep order, types and the item-1 caption with collapsed quote',async t=>{
+ const text='Long Instagram caption\nline 2\n\n#tag\n📸 @owner · Carousel';
+ for(const kinds of [['video','video','video'],['photo','video','video','photo']]){
+  const s=setup(t);let r;
+  for(const [i,kind] of kinds.entries()){const media=kind==='photo'?photo(i+1):{video:{file_id:'video'+i,file_unique_id:'video'+i,mime_type:'video/mp4',file_size:100,duration:5}};
+   r=await s.handle(input(i+1,{...media,media_group_id:'insta',...(i===0?{caption:text,caption_entities:[{type:'expandable_blockquote',offset:0,length:29}]}:{})}));}
+  const d=s.store.read(r.json.jobKey);assert.equal(d.assets.length,kinds.length);assert.deepEqual(d.assets.map(a=>a.kind),kinds);
+  s.store.change(r.json.jobKey,x=>({...x,lastAssetAt:Date.now()-3000}));await press(s,'ready',90);const mock=transport(s);
+  assert.equal((await press(s,'t10')).json.status,'sent');
+  assert.deepEqual(mock.request.multiMedia.map(x=>x.media.className),kinds.map(k=>k==='photo'?'InputMediaPhoto':'InputMediaDocument'));
+  assert.deepEqual(mock.request.multiMedia.map(x=>x.message),[text,...kinds.slice(1).map(()=>'')]);
+  const quote=mock.request.multiMedia[0].entities.find(e=>e.className==='MessageEntityBlockquote');assert(quote&&quote.collapsed===true&&quote.length===29);
+  assert(mock.request.multiMedia.slice(1).every(x=>x.entities.length===0));
+ }
+});
