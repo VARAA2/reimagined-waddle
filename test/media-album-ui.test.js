@@ -82,3 +82,48 @@ test('operator can persist partial topic order, new topics follow, and reset wit
  const s=setup(t);s.topics=async()=>[{id:10,title:'First'},{id:20,title:'Second'},{id:30,title:'Third'}];await s.handle(input(1,{text:'/topicorder'}));assert.equal((await s.handle(input(2,{text:'3, 1'}))).json.status,'order_saved');assert.deepEqual((await s.orderedTopics('42')).map(t=>t.id),[30,10,20]);assert.deepEqual((await s.orderedTopics('43')).map(t=>t.id),[10,20,30]);
  s.topics=async()=>[{id:10,title:'Renamed'},{id:20,title:'Second'},{id:30,title:'Third'},{id:40,title:'New'}];assert.deepEqual((await s.orderedTopics('42')).map(t=>t.id),[30,10,20,40]);await s.handle(input(3,{text:'/topicorder'}));assert.equal((await s.handle(input(4,{text:'1,1'}))).json.status,'order_invalid');await press(s,'resetorder',5);assert.deepEqual((await s.orderedTopics('42')).map(t=>t.id),[10,20,30,40]);
 });
+// Several pending media: each keyboard and each media can be answered by Reply, in any order.
+function sends(s){const sent=[];s.publish=async(d,topicId)=>{sent.push({key:d.key,source:d.sourceMessageId,topicId});s.store.change(d.key,x=>({...x,status:'sent',receipt:{url:'https://t.me/c/1/'+topicId+'/'+d.sourceMessageId}}));await s.home(d.owner);return {next:0,status:'sent',jobKey:d.key};};return sent;}
+const fromBot={id:99,is_bot:true},fromOwner={id:42,is_bot:false};
+async function three(t){const s=setup(t);s.topics=async()=>[{id:10,title:'Cinema'},{id:11,title:'News'}];const keys=[];for(const id of [1,2,3])keys.push((await s.handle(input(id,photo(id)))).json.jobKey);return {s,keys,sent:sends(s)};}
+const topic=(s,key,title)=>{const ui=s.store.read('kbd_42_'+s.store.read(key).controlId);return ui.choices.find(x=>x.text.endsWith(title)).text;};
+test('reply to an older topic keyboard posts that exact media, then the others still work in any order',async t=>{
+ const {s,keys,sent}=await three(t);const [k1,k2,k3]=keys.map(k=>s.store.read(k));
+ assert.equal((await s.handle(input(10,{text:topic(s,k1.key,'News'),reply_to_message:{message_id:k1.controlId,from:fromBot}}))).json.status,'sent');
+ assert.deepEqual(sent.at(-1),{key:k1.key,source:1,topicId:11});assert.equal(s.store.read('ui_42').kind,'home');
+ assert.equal((await s.handle(input(11,{text:topic(s,k3.key,'Cinema'),reply_to_message:{message_id:k3.controlId,from:fromBot}}))).json.status,'sent');
+ assert.equal((await s.handle(input(12,{text:topic(s,k2.key,'News'),reply_to_message:{message_id:k2.controlId,from:fromBot}}))).json.status,'sent');
+ assert.deepEqual(sent.map(x=>[x.source,x.topicId]),[[1,11],[3,10],[2,11]]);assert(keys.every(k=>s.store.read(k).status==='sent'));
+});
+test('reply to the earlier media itself with a topic from the shown keyboard posts that media, not the latest',async t=>{
+ const {s,keys,sent}=await three(t);const latest=s.store.read('ui_42');assert.equal(latest.key,keys[2]);
+ const text=latest.choices.find(x=>x.text.endsWith('Cinema')).text;
+ await s.handle(input(10,{text,reply_to_message:{message_id:1,from:fromOwner,photo:photo(1).photo}}));
+ assert.deepEqual(sent,[{key:keys[0],source:1,topicId:10}]);assert.equal(s.store.read(keys[2]).status,'pending');assert.equal(s.store.read(keys[1]).status,'pending');
+ await s.handle(input(11,{text:s.store.read('ui_42').choices.find(x=>x.text.endsWith('Cinema'))?.text||'x',reply_to_message:{message_id:2,from:fromOwner}}));
+ assert.equal(s.store.read(keys[1]).status,'pending');assert.equal(s.store.read('ui_42').key,keys[1]);
+ await s.handle(input(12,{text:topic(s,keys[1],'News'),reply_to_message:{message_id:2,from:fromOwner}}));
+ assert.deepEqual(sent.at(-1),{key:keys[1],source:2,topicId:11});
+});
+test('plain tap without reply still posts the latest media',async t=>{
+ const {s,keys,sent}=await three(t);await press(s,'t11',10);assert.deepEqual(sent,[{key:keys[2],source:3,topicId:11}]);assert.equal(s.store.read(keys[0]).status,'pending');
+});
+test('already posted or cancelled media refuse politely through old keyboard or media reply',async t=>{
+ const {s,keys,sent}=await three(t);const k1=s.store.read(keys[0]),k2=s.store.read(keys[1]);const text=topic(s,k1.key,'News');
+ await s.handle(input(10,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(sent.length,1);
+ const again=await s.handle(input(11,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(again.json.status,'already_sent');assert.equal(sent.length,1);assert(s.calls.at(-1).body.text.includes('ஏற்கெனவே பதிவிடப்பட்டது'));
+ const viaMedia=await s.handle(input(12,{text:'News',reply_to_message:{message_id:1,from:fromOwner}}));assert.equal(viaMedia.json.status,'already_sent');
+ const cancel=s.store.read('kbd_42_'+k2.controlId).choices.find(x=>x.action==='cancel').text;
+ assert.equal((await s.handle(input(13,{text:cancel,reply_to_message:{message_id:k2.controlId,from:fromBot}}))).json.status,'cancelled');assert.equal(s.store.read(keys[1]).status,'cancelled');assert.equal(s.store.read(keys[2]).status,'pending');
+ const late=await s.handle(input(14,{text:topic(s,k2.key,'Cinema'),reply_to_message:{message_id:k2.controlId,from:fromBot}}));assert.equal(late.json.status,'already_cancelled');assert.equal(sent.length,1);
+});
+test('keyboards shown before this version are matched by their control message',async t=>{
+ const {s,keys,sent}=await three(t);const k1=s.store.read(keys[0]);const text=topic(s,k1.key,'Cinema');
+ for(const f of fs.readdirSync(s.store.root))if(f.startsWith('kbd_'))fs.rmSync(path.join(s.store.root,f));
+ await s.handle(input(10,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.deepEqual(sent,[{key:keys[0],source:1,topicId:10}]);
+});
+test('reply from another operator or to an unknown bot message never selects someone else\'s draft',async t=>{
+ const {s,keys,sent}=await three(t);const k1=s.store.read(keys[0]);const text=topic(s,k1.key,'Cinema');
+ const other=await s.handle(input(10,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}},43));assert.equal(other.json.status,'unsupported');assert.equal(s.store.read(keys[0]).status,'pending');
+ await assert.rejects(s.handle(input(11,{text,reply_to_message:{message_id:5555,from:fromBot}})),/STALE_KEYBOARD/);assert.equal(sent.length,0);
+});

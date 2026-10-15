@@ -7,6 +7,7 @@ const destinations=require('./destinations');
 const {composeAnalysisReport}=require('./hashtag-policy.cjs');
 const check=(ok,code)=>{if(!ok)throw Error('MEDIA_'+code);};
 const sid=x=>String(x??'');
+const positive=x=>Number.isSafeInteger(x)&&x>0;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const bound=async promise=>{let timer;try{return await Promise.race([promise,new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('MEDIA_TIMEOUT')),30000))]);}finally{clearTimeout(timer);}};
 const PAGE_SIZE=8;
@@ -59,8 +60,26 @@ function install(Service,parseMedia){
  };
  Service.prototype.showKeyboard=async function(owner,text,choices,rows,extra={},state={}){
   const m=await this.keyboardSend(owner,text,{...extra,reply_markup:{keyboard:rows,resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});
-  this.store.change('ui_'+owner,()=>({...state,owner,controlId:m.message_id,shownAt:Date.now(),choices:choices.map(x=>({text:x.button.text,action:x.action}))}));
+  const ui={...state,owner,controlId:m.message_id,shownAt:Date.now(),choices:choices.map(x=>({text:x.button.text,action:x.action}))};
+  this.store.change('ui_'+owner,()=>ui);
+  // Remember every draft keyboard, so a Reply to an older one acts on its own media.
+  if(state.key&&positive(m.message_id))this.store.change('kbd_'+owner+'_'+m.message_id,()=>ui);
   return m;
+ };
+ Service.prototype.replyTarget=function(owner,m,ui){
+  // Reply to an earlier topic question or to the earlier media itself selects that exact draft.
+  const ref=m.reply_to_message;if(m.chat?.type!=='private'||!positive(ref?.message_id)||ref.message_id===ui?.controlId)return null;
+  const fromBot=sid(ref.from?.id)===sid(this.me.id),fromOwner=sid(ref.from?.id)===owner,id=ref.message_id;
+  const kb=fromBot?this.store.read('kbd_'+owner+'_'+id):null;
+  if(kb?.key&&kb.owner===owner){const draft=this.store.read(kb.key);if(draft?.owner===owner)return {kb,draft};}
+  const draft=(this.store.read('pending_'+owner)?.keys||[]).map(k=>this.store.read(k)).find(d=>d&&d.owner===owner&&(fromBot?[d.controlId,d.receiptControlId].includes(id):fromOwner&&(d.sourceMessageId===id||d.assets?.some(a=>a.sourceMessageId===id))));
+  return draft?{kb:null,draft}:null;
+ };
+ Service.prototype.refuseHandled=async function(d){
+  if(['pending','collecting'].includes(d.status))return null;
+  if(d.status==='sent'){await this.tell(d.owner,'✅ இந்த media ஏற்கெனவே பதிவிடப்பட்டது.'+(d.receipt?.url?'\n'+d.receipt.url:''),{disable_web_page_preview:true});return {json:{next:0,status:'already_sent',jobKey:d.key}};}
+  if(d.status==='cancelled'){await this.tell(d.owner,'❌ இந்த media ரத்து செய்யப்பட்டது. பதிவிட வேண்டுமென்றால் மீண்டும் அனுப்புங்கள்.');return {json:{next:0,status:'already_cancelled',jobKey:d.key}};}
+  await this.tell(d.owner,d.status==='analysing'?'⏳ இந்த media-க்கு analysis நடக்கிறது. முடிந்ததும் topic தேர்வு செய்யுங்கள்.':'⏳ இந்த media ஏற்கெனவே கையாளப்படுகிறது. Group-ல் சரிபாருங்கள்.');return {json:{next:0,status:'already_handled',jobKey:d.key}};
  };
  Service.prototype.addPending=function(d){this.store.change('pending_'+d.owner,old=>({keys:[d.key,...(old?.keys||[]).filter(k=>k!==d.key)].slice(0,100)}));};
  Service.prototype.pendingDrafts=function(owner){return (this.store.read('pending_'+owner)?.keys||[]).map(k=>this.store.read(k)).filter(d=>d&&d.owner===owner&&['pending','collecting','analysing'].includes(d.status));};
@@ -149,12 +168,13 @@ function install(Service,parseMedia){
   if(!this.scope.replyKeyboard)return legacy.handle.call(this,u);
   if(m.reply_to_message&&this.store.read('reply_'+owner+'_'+m.reply_to_message.message_id))return legacy.handle.call(this,u);
   const text=(m.text||'').trim();
-  const ui=this.store.read('ui_'+owner),choice=ui?.choices?.find(x=>x.text===text);
+  const latest=this.store.read('ui_'+owner),target=this.replyTarget(owner,m,latest);
+  const ui=target?.kb||latest,choice=ui?.choices?.find(x=>x.text===text);
   if(/^\/topicorder(?:@\w+)?$/.test(text)){await this.showOrder(owner);return {json:{next:0,status:'topic_order'}};}
   if(choice){
    check(m.date>=Math.floor(ui.shownAt/1000)-1,'STALE_KEYBOARD');
-   if(m.reply_to_message&&m.reply_to_message.message_id!==ui.controlId)throw Error('MEDIA_STALE_KEYBOARD');
-   const action=choice.action;let d=ui.key?this.store.read(ui.key):null;
+   if(!target&&m.reply_to_message&&m.reply_to_message.message_id!==ui.controlId)throw Error('MEDIA_STALE_KEYBOARD');
+   const action=choice.action;let d=target?target.draft:ui.key?this.store.read(ui.key):null;
    if(action==='home'||action==='upload'||action==='help'){await this.home(owner);return {json:{next:0,status:'menu'}};}
    if(action==='pending'){await this.showPending(owner);return {json:{next:0,status:'draft_list'}};}
    if(action==='order'){await this.showOrder(owner);return {json:{next:0,status:'topic_order'}};}
@@ -163,13 +183,14 @@ function install(Service,parseMedia){
    if(action.startsWith('draft:')){d=this.store.read(action.slice(6));check(d?.owner===owner&&['collecting','pending'].includes(d.status),'DRAFT_NOT_READY');await this.display(d);return {json:{next:0,status:'draft_selected'}};}
    if(action.startsWith('edit:')){d=this.store.read(action.slice(5));check(d?.owner===owner&&d.status==='sent','STALE_EDIT');await this.requestEdit(d);return {json:{next:0,status:'await_caption'}};}
    check(d&&d.owner===owner,'STALE_KEYBOARD');
+   if(target&&!(d.status==='analysing'&&['cancel','off'].includes(action))){const refused=await this.refuseHandled(d);if(refused)return refused;}
    if(action==='ready')return this.readyAlbum(d);
    if(action==='cancel'){
-    check(d.controlId===ui.controlId&&(d.status==='collecting'||d.rev===ui.rev),'STALE_KEYBOARD');
+    check(target||d.controlId===ui.controlId&&(d.status==='collecting'||d.rev===ui.rev),'STALE_KEYBOARD');
     this.store.change(d.key,x=>{check(x.rev===d.rev&&['collecting','pending','analysing'].includes(x.status),'ALREADY_HANDLED');return {...x,status:'cancelled',rev:x.rev+1};});
     await this.tell(owner,'❌ இந்த draft ரத்து செய்யப்பட்டது.');await this.home(owner);return {json:{next:0,status:'cancelled'}};
    }
-   check(d.rev===ui.rev&&d.controlId===ui.controlId,'STALE_KEYBOARD');
+   check(target||d.rev===ui.rev&&d.controlId===ui.controlId,'STALE_KEYBOARD');
    const event={update_id:u.update_id,callback_query:{id:'keyboard-'+u.update_id,from:m.from,data:'mc:'+d.key+':'+d.rev+':'+action,message:{message_id:d.controlId,chat:m.chat,from:this.me}}};
    // These are authenticated text button presses. There is no Bot API callback to acknowledge.
    const bot=this.bot;this.bot=async(method,body)=>method==='answerCallbackQuery'&&body.callback_query_id===event.callback_query.id?{}:bot.call(this,method,body);
@@ -182,6 +203,7 @@ function install(Service,parseMedia){
    this.store.change('topic_order_'+owner,()=>({ids,orderRevision:this.scope.topicOrderRevision,updatedAt:Date.now()}));await this.tell(owner,'✅ உங்களுக்கான topic வரிசை சேமிக்கப்பட்டது. அடுத்த topic தேர்வில் இந்த வரிசை வரும்.');await this.home(owner);return {json:{next:0,status:'order_saved'}};
   }
   if(/^\/(start|help|menu)(?:@\w+)?(?:\s|$)/.test(text)){await this.home(owner);return {json:{next:0,status:'menu'}};}
+  if(target&&text&&!text.startsWith('/')){const refused=await this.refuseHandled(target.draft);if(refused)return refused;await this.display(target.draft);return {json:{next:0,status:'draft_selected',jobKey:target.draft.key}};}
   return legacy.handle.call(this,u);
  };
  Service.prototype.publish=async function(d,topicId,groupId=this.scope.groupId){
