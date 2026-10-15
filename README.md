@@ -84,6 +84,8 @@ Telethon IPv4 StringSession compatibility is verified with a synthetic session o
 
 Node.js 20 or newer is required by this package. Run `npm ci --ignore-scripts`, `npm test`, then `npm pack`. There is no build step: reviewed CommonJS runtime files are already under `dist`. Tests use fake clients and synthetic keys only. No install lifecycle hooks are included; `prepack` runs the offline suite locally.
 
+Releases are published from GitHub Actions (`.github/workflows/publish.yml`) through npm trusted publishing, with no npm token. Bump `version` in `package.json`, run `npm test`, push `main`, then push a tag `vX.Y.Z` equal to that version (never reuse or move a tag). The job runs `npm ci` and `npm test`, checks that the tag matches the version, and waits in the `npm-publish` environment until a maintainer approves it before `npm publish` runs.
+
 Primary references: [Teleproto package](https://www.npmjs.com/package/teleproto), [String sessions](https://ref.teleproto.dev/classes/sessions.StringSession.html), [Telegram sendMessage](https://core.telegram.org/method/messages.sendMessage), [Telegram reply target](https://core.telegram.org/constructor/inputReplyToMessage).
 # 0.4.0: Operator-written direct replies
 
