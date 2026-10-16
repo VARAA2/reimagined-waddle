@@ -64,3 +64,17 @@ test('both private display paths emit exactly two independent complete native mo
   if(!analysisOnly)assert(b.reply_markup.keyboard.length>0);
  }
 });
+test('a group can get a short admin menu (only analyze + menu) while private chats and other groups keep all',async t=>{
+ const s=setup(t),[g1,g2]=scope.adminCommandGroupIds,key=id=>JSON.stringify({type:'chat_administrators',chat_id:id});
+ s.scope=config(creds,{...scope,adminGroupCommands:{[g2]:['analyze','menu']}});
+ s.menus.set(key(g2),[{command:'custom',description:'Existing'},{command:'audiosummary',description:'Audio'}]);
+ await s.configureCommands();await s.configureAudioCommands();
+ assert.deepEqual(s.menus.get(key(g2)).map(c=>c.command),['custom','menu','analyze']);
+ assert.deepEqual(s.menus.get(key(g1)).map(c=>c.command),['start','menu','topicorder','analyze','cancel','help','audiosummary','cancelaudio']);
+ assert(s.menus.get(JSON.stringify({type:'all_private_chats'})).some(c=>c.command==='topicorder'));
+ assert(s.menus.get(JSON.stringify({type:'all_private_chats'})).some(c=>c.command==='audiosummary'));
+});
+test('short admin menu config is checked',()=>{
+ for(const bad of [{'-1009999900000':['menu']},{'-1002345600000':[]},{'-1002345600000':['poll']},{'-1002345600000':['menu','menu']},['menu']])
+  assert.throws(()=>config(creds,{...scope,adminGroupCommands:bad}),/ADMIN_GROUP_COMMANDS/);
+});

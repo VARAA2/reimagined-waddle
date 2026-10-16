@@ -2,9 +2,18 @@
 const {jobKey}=require('./store');
 const check=(ok,code)=>{if(!ok)throw Error('MEDIA_'+code);};
 const names=['start','menu','topicorder','analyze','cancel','help'];
+// Every command this bot registers in group admin menus (media + audio). Others found in a menu are kept.
+const owned=[...names,'audiosummary','cancelaudio'];
+// Optional per-group short menu: scope.adminGroupCommands = {"-100…":["analyze","menu"]}; groups not listed keep all.
+function trim(scope,id,commands){
+ const allow=scope.adminGroupCommands?.[id];
+ return Array.isArray(allow)?commands.filter(c=>!owned.includes(c.command)||allow.includes(c.command)):commands;
+}
 function validate(scope){
  const ids=scope.adminCommandGroupIds;
  check(ids===undefined||(Array.isArray(ids)&&ids.length<=20&&ids.every(id=>typeof id==='string'&&/^-100[1-9]\d+$/.test(id)&&Number.isSafeInteger(Number(id)))&&new Set(ids).size===ids.length),'ADMIN_COMMAND_GROUPS');
+ const short=scope.adminGroupCommands;
+ check(short===undefined||(short&&typeof short==='object'&&!Array.isArray(short)&&Object.entries(short).every(([id,list])=>(ids||[]).includes(id)&&Array.isArray(list)&&list.length>0&&list.every(c=>owned.includes(c))&&new Set(list).size===list.length)),'ADMIN_GROUP_COMMANDS');
 }
 function command(text,username){
  const m=/^\/(start|menu|topicorder|analyze|analysis|cancel|help)(?:@([a-z0-9_]+))?(?:\s+(.*))?$/i.exec((text||'').trim());
@@ -19,7 +28,7 @@ function install(Service){
   for(const id of desired){
    const scope={type:'chat_administrators',chat_id:id};
    const before=await this.bot('getMyCommands',{scope});
-   const next=[...before.filter(c=>!names.includes(c.command)),...commands];
+   const next=trim(this.scope,id,[...before.filter(c=>!names.includes(c.command)),...commands]);
    check(next.length<=100,'TOO_MANY_COMMANDS');
    await this.bot('setMyCommands',{scope,commands:next});
    const actual=await this.bot('getMyCommands',{scope});
@@ -71,4 +80,4 @@ function install(Service){
   return handle.call(this,u);
  };
 }
-module.exports={validate,command,install};
+module.exports={validate,command,install,trim};

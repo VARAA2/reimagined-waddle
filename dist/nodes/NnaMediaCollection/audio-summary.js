@@ -13,7 +13,7 @@ function install(Service,authenticate){
  Service.prototype.configureAudioCommands=async function(){
   const add=[{command:'audiosummary',description:'Voice / audio-வின் தமிழ் சுருக்கம்'},{command:'cancelaudio',description:'Audio Summary-ஐ ரத்து செய்'}];
   for(const scope of [{type:'all_private_chats'},...(this.scope.adminCommandGroupIds||[]).map(chat_id=>({type:'chat_administrators',chat_id}))]){
-   const old=await this.bot('getMyCommands',{scope});const commands=[...old.filter(c=>!add.some(n=>n.command===c.command)),...add];
+   const old=await this.bot('getMyCommands',{scope});let commands=[...old.filter(c=>!add.some(n=>n.command===c.command)),...add];if(scope.chat_id)commands=require('./group-commands').trim(this.scope,scope.chat_id,commands);
    if(commands.length>100)throw Error('MEDIA_TOO_MANY_COMMANDS');await this.bot('setMyCommands',{scope,commands});
    if(JSON.stringify(await this.bot('getMyCommands',{scope}))!==JSON.stringify(commands))throw Error('MEDIA_COMMANDS_UNCONFIRMED');
   }return {status:'audio_commands_configured'};
