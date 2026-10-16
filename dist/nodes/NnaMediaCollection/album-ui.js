@@ -72,7 +72,7 @@ function install(Service,parseMedia){
   const fromBot=sid(ref.from?.id)===sid(this.me.id),fromOwner=sid(ref.from?.id)===owner,id=ref.message_id;
   const kb=fromBot?this.store.read('kbd_'+owner+'_'+id):null;
   if(kb?.key&&kb.owner===owner){const draft=this.store.read(kb.key);if(draft?.owner===owner)return {kb,draft};}
-  const draft=(this.store.read('pending_'+owner)?.keys||[]).map(k=>this.store.read(k)).find(d=>d&&d.owner===owner&&(fromBot?[d.controlId,d.receiptControlId].includes(id):fromOwner&&(d.sourceMessageId===id||d.assets?.some(a=>a.sourceMessageId===id))));
+  const draft=(this.store.read('pending_'+owner)?.keys||[]).map(k=>this.store.read(k)).find(d=>d&&d.owner===owner&&(fromBot?[d.controlId,d.receiptControlId].includes(id)||(d.copies||[]).some(c=>this.store.read(c.key)?.receiptControlId===id):fromOwner&&(d.sourceMessageId===id||d.assets?.some(a=>a.sourceMessageId===id))));
   return draft?{kb:null,draft}:null;
  };
  Service.prototype.refuseHandled=async function(d){
@@ -80,6 +80,20 @@ function install(Service,parseMedia){
   if(d.status==='sent'){await this.tell(d.owner,'✅ இந்த media ஏற்கெனவே பதிவிடப்பட்டது.'+(d.receipt?.url?'\n'+d.receipt.url:''),{disable_web_page_preview:true});return {json:{next:0,status:'already_sent',jobKey:d.key}};}
   if(d.status==='cancelled'){await this.tell(d.owner,'❌ இந்த media ரத்து செய்யப்பட்டது. பதிவிட வேண்டுமென்றால் மீண்டும் அனுப்புங்கள்.');return {json:{next:0,status:'already_cancelled',jobKey:d.key}};}
   await this.tell(d.owner,d.status==='analysing'?'⏳ இந்த media-க்கு analysis நடக்கிறது. முடிந்ததும் topic தேர்வு செய்யுங்கள்.':'⏳ இந்த media ஏற்கெனவே கையாளப்படுகிறது. Group-ல் சரிபாருங்கள்.');return {json:{next:0,status:'already_handled',jobKey:d.key}};
+ };
+ Service.prototype.postCopy=async function(d,action,u){
+  // An already-posted media may go to more topics; never twice into the same topic.
+  const {topicId,groupId}=destinations.resolveDestination(this.scope,action.slice(1));
+  const same=r=>r&&r.topicId===topicId&&(r.groupId||this.scope.groupId)===groupId;
+  const copies=(d.copies||[]).map(c=>this.store.read(c.key)).filter(Boolean);
+  const done=[d.receipt,...copies.filter(c=>c.status==='sent').map(c=>c.receipt)].find(same);
+  if(done){await this.tell(d.owner,'✅ இந்த media இந்த topic-ல் ஏற்கெனவே பதிவிடப்பட்டது. வேறு topic தேர்வு செய்யலாம்.'+(done.url?'\n'+done.url:''),{disable_web_page_preview:true});return {json:{next:0,status:'already_in_topic',jobKey:d.key}};}
+  const key=this.jobKey(d.owner,'copy:'+d.key+':'+groupId+':'+topicId);let claimed=false;
+  const {copies:_c,receipt:_r,receiptControlId:_rc,sentAt:_s,lastError:_e,...asset}=d;
+  const c=this.store.change(key,old=>{if(old&&old.status!=='pending')return undefined;claimed=true;return {...asset,key,rev:(old?.rev||0)+1,status:'sending',copyOf:d.key,controlId:0,topicId,targetGroupId:groupId,selectedAt:Date.now(),selectedUpdateId:u.update_id,createdAt:old?.createdAt||Date.now()};});
+  if(!claimed){await this.tell(d.owner,'⏳ இந்த topic-க்கான பதிவு ஏற்கெனவே நடக்கிறது அல்லது முடிவு உறுதியாகவில்லை. Group-ல் சரிபாருங்கள்.');return {json:{next:0,status:'copy_in_progress',jobKey:key}};}
+  this.store.change(d.key,x=>({...x,copies:[...(x.copies||[]).filter(k=>k.key!==key),{key,topicId,groupId}].slice(-50)}));
+  return {json:await this.publish(c,topicId,groupId)};
  };
  Service.prototype.addPending=function(d){this.store.change('pending_'+d.owner,old=>({keys:[d.key,...(old?.keys||[]).filter(k=>k!==d.key)].slice(0,100)}));};
  Service.prototype.pendingDrafts=function(owner){return (this.store.read('pending_'+owner)?.keys||[]).map(k=>this.store.read(k)).filter(d=>d&&d.owner===owner&&['pending','collecting','analysing'].includes(d.status));};
@@ -184,6 +198,7 @@ function install(Service,parseMedia){
    if(action.startsWith('draft:')){d=this.store.read(action.slice(6));check(d?.owner===owner&&['collecting','pending'].includes(d.status),'DRAFT_NOT_READY');await this.display(d);return {json:{next:0,status:'draft_selected'}};}
    if(action.startsWith('edit:')){d=this.store.read(action.slice(5));check(d?.owner===owner&&d.status==='sent','STALE_EDIT');await this.requestEdit(d);return {json:{next:0,status:'await_caption'}};}
    check(d&&d.owner===owner,'STALE_KEYBOARD');
+   if(d.status==='sent'&&action[0]==='t'&&(target||d.controlId===ui.controlId))return this.postCopy(d,action,u);
    if(target&&!(d.status==='analysing'&&['cancel','off'].includes(action))){const refused=await this.refuseHandled(d);if(refused)return refused;}
    if(action==='ready')return this.readyAlbum(d);
    if(action==='cancel'){
@@ -204,7 +219,7 @@ function install(Service,parseMedia){
    this.store.change('topic_order_'+owner,()=>({ids,orderRevision:this.scope.topicOrderRevision,updatedAt:Date.now()}));await this.tell(owner,'✅ உங்களுக்கான topic வரிசை சேமிக்கப்பட்டது. அடுத்த topic தேர்வில் இந்த வரிசை வரும்.');await this.home(owner);return {json:{next:0,status:'order_saved'}};
   }
   if(/^\/(start|help|menu)(?:@\w+)?(?:\s|$)/.test(text)){await this.home(owner);return {json:{next:0,status:'menu'}};}
-  if(target&&text&&!text.startsWith('/')){const refused=await this.refuseHandled(target.draft);if(refused)return refused;await this.display(target.draft);return {json:{next:0,status:'draft_selected',jobKey:target.draft.key}};}
+  if(target&&text&&!text.startsWith('/')){const refused=target.draft.status==='sent'?null:await this.refuseHandled(target.draft);if(refused)return refused;await this.display(target.draft);return {json:{next:0,status:'draft_selected',jobKey:target.draft.key}};}
   return legacy.handle.call(this,u);
  };
  Service.prototype.publish=async function(d,topicId,groupId=this.scope.groupId){

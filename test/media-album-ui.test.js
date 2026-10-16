@@ -83,7 +83,7 @@ test('operator can persist partial topic order, new topics follow, and reset wit
  s.topics=async()=>[{id:10,title:'Renamed'},{id:20,title:'Second'},{id:30,title:'Third'},{id:40,title:'New'}];assert.deepEqual((await s.orderedTopics('42')).map(t=>t.id),[30,10,20,40]);await s.handle(input(3,{text:'/topicorder'}));assert.equal((await s.handle(input(4,{text:'1,1'}))).json.status,'order_invalid');await press(s,'resetorder',5);assert.deepEqual((await s.orderedTopics('42')).map(t=>t.id),[10,20,30,40]);
 });
 // Several pending media: each keyboard and each media can be answered by Reply, in any order.
-function sends(s){const sent=[];s.publish=async(d,topicId)=>{sent.push({key:d.key,source:d.sourceMessageId,topicId});s.store.change(d.key,x=>({...x,status:'sent',receipt:{url:'https://t.me/c/1/'+topicId+'/'+d.sourceMessageId}}));await s.home(d.owner);return {next:0,status:'sent',jobKey:d.key};};return sent;}
+function sends(s){const sent=[];s.publish=async(d,topicId)=>{sent.push({key:d.key,source:d.sourceMessageId,topicId});s.store.change(d.key,x=>({...x,status:'sent',receipt:{url:'https://t.me/c/1/'+topicId+'/'+d.sourceMessageId,topicId,groupId:'-1001234500000'},receiptControlId:7000+sent.length}));await s.home(d.owner);return {next:0,status:'sent',jobKey:d.key};};return sent;}
 const fromBot={id:99,is_bot:true},fromOwner={id:42,is_bot:false};
 async function three(t){const s=setup(t);s.topics=async()=>[{id:10,title:'Cinema'},{id:11,title:'News'}];const keys=[];for(const id of [1,2,3])keys.push((await s.handle(input(id,photo(id)))).json.jobKey);return {s,keys,sent:sends(s)};}
 const topic=(s,key,title)=>{const ui=s.store.read('kbd_42_'+s.store.read(key).controlId);return ui.choices.find(x=>x.text.endsWith(title)).text;};
@@ -111,8 +111,8 @@ test('plain tap without reply still posts the latest media',async t=>{
 test('already posted or cancelled media refuse politely through old keyboard or media reply',async t=>{
  const {s,keys,sent}=await three(t);const k1=s.store.read(keys[0]),k2=s.store.read(keys[1]);const text=topic(s,k1.key,'News');
  await s.handle(input(10,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(sent.length,1);
- const again=await s.handle(input(11,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(again.json.status,'already_sent');assert.equal(sent.length,1);assert(s.calls.at(-1).body.text.includes('ஏற்கெனவே பதிவிடப்பட்டது'));
- const viaMedia=await s.handle(input(12,{text:'News',reply_to_message:{message_id:1,from:fromOwner}}));assert.equal(viaMedia.json.status,'already_sent');
+ const again=await s.handle(input(11,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(again.json.status,'already_in_topic');assert.equal(sent.length,1);assert(s.calls.at(-1).body.text.includes('ஏற்கெனவே பதிவிடப்பட்டது'));
+ const viaMedia=await s.handle(input(12,{text:'News',reply_to_message:{message_id:1,from:fromOwner}}));assert.equal(viaMedia.json.status,'draft_selected');assert.equal(s.store.read('ui_42').key,keys[0]);
  const cancel=s.store.read('kbd_42_'+k2.controlId).choices.find(x=>x.action==='cancel').text;
  assert.equal((await s.handle(input(13,{text:cancel,reply_to_message:{message_id:k2.controlId,from:fromBot}}))).json.status,'cancelled');assert.equal(s.store.read(keys[1]).status,'cancelled');assert.equal(s.store.read(keys[2]).status,'pending');
  const late=await s.handle(input(14,{text:topic(s,k2.key,'Cinema'),reply_to_message:{message_id:k2.controlId,from:fromBot}}));assert.equal(late.json.status,'already_cancelled');assert.equal(sent.length,1);
@@ -147,4 +147,30 @@ test('Insta Saver carousel layout: video-only and mixed albums keep order, types
   const quote=mock.request.multiMedia[0].entities.find(e=>e.className==='MessageEntityBlockquote');assert(quote&&quote.collapsed===true&&quote.length===29);
   assert(mock.request.multiMedia.slice(1).every(x=>x.entities.length===0));
  }
+});
+test('a posted media can be posted again to another topic as its own copy, never twice into one topic',async t=>{
+ const {s,keys,sent}=await three(t);const k1=s.store.read(keys[0]);
+ await s.handle(input(10,{text:topic(s,k1.key,'News'),reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(sent.length,1);
+ const copy=await s.handle(input(11,{text:topic(s,k1.key,'Cinema'),reply_to_message:{message_id:k1.controlId,from:fromBot}}));
+ assert.equal(copy.json.status,'sent');assert.equal(sent.length,2);assert.equal(sent[1].topicId,10);assert.equal(sent[1].source,1);assert.notEqual(sent[1].key,keys[0]);
+ const c=s.store.read(sent[1].key);assert.equal(c.copyOf,keys[0]);assert.equal(c.fileId,k1.fileId);assert.equal(c.status,'sent');assert.deepEqual(s.store.read(keys[0]).copies.map(x=>x.topicId),[10]);
+ assert.equal(s.store.read(keys[0]).receipt.topicId,11);
+ for(const [id,title] of [[12,'Cinema'],[13,'News']]){const r=await s.handle(input(id,{text:topic(s,k1.key,title),reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(r.json.status,'already_in_topic');}
+ const viaCopyReceipt=await s.handle(input(14,{text:topic(s,k1.key,'Cinema'),reply_to_message:{message_id:c.receiptControlId,from:fromBot}}));assert.equal(viaCopyReceipt.json.status,'draft_selected');assert.equal(s.store.read('ui_42').key,keys[0]);assert.equal(sent.length,2);
+ assert.equal(s.store.read(keys[1]).status,'pending');assert.equal(s.store.read(keys[2]).status,'pending');
+});
+test('text Reply to a posted media shows its topics again and a plain tap there posts a copy',async t=>{
+ const {s,keys,sent}=await three(t);await press(s,'t11',10);assert.equal(sent[0].key,keys[2]);
+ const shown=await s.handle(input(11,{text:'again',reply_to_message:{message_id:3,from:fromOwner}}));assert.equal(shown.json.status,'draft_selected');assert.equal(s.store.read('ui_42').key,keys[2]);
+ await press(s,'t10',12);assert.equal(sent.length,2);assert.equal(sent[1].topicId,10);assert.equal(s.store.read(sent[1].key).copyOf,keys[2]);
+ await s.handle(input(13,{text:'again',reply_to_message:{message_id:3,from:fromOwner}}));assert.equal((await press(s,'t11',14)).json.status,'already_in_topic');assert.equal(sent.length,2);
+});
+test('a copy that failed before sending can be retried, one in flight is not sent twice',async t=>{
+ const {s,keys,sent}=await three(t);const k1=s.store.read(keys[0]);
+ await s.handle(input(10,{text:topic(s,k1.key,'News'),reply_to_message:{message_id:k1.controlId,from:fromBot}}));
+ const real=s.publish;let fail=true;s.publish=async(d,topicId)=>{if(fail){s.store.change(d.key,x=>({...x,status:'pending'}));return {next:0,status:'failed'};}return real(d,topicId);};
+ assert.equal((await s.handle(input(11,{text:topic(s,k1.key,'Cinema'),reply_to_message:{message_id:k1.controlId,from:fromBot}}))).json.status,'failed');
+ fail=false;assert.equal((await s.handle(input(12,{text:topic(s,k1.key,'Cinema'),reply_to_message:{message_id:k1.controlId,from:fromBot}}))).json.status,'sent');assert.equal(sent.length,2);
+ const key=sent[1].key;s.store.change(key,x=>({...x,status:'sending'}));s.store.change(keys[0],x=>({...x,copies:[]}));
+ assert.equal((await s.handle(input(13,{text:topic(s,k1.key,'Cinema'),reply_to_message:{message_id:k1.controlId,from:fromBot}}))).json.status,'copy_in_progress');assert.equal(sent.length,2);
 });
