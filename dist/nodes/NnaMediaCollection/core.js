@@ -160,7 +160,7 @@ class Service{
   try{
    const receipt=await this.personal(async(client,me)=>{
     destinations.assertDestination(this.scope,groupId,topicId);
-    const allowed=await this.topics(client,groupId);check(allowed.some(t=>destinations.matchesTopic(t,this.scope,groupId,topicId)),'TOPIC_UNAVAILABLE');
+    const allowed=await this.topics(client,groupId);const chosen=allowed.find(t=>destinations.matchesTopic(t,this.scope,groupId,topicId));check(chosen,'TOPIC_UNAVAILABLE');
     const includeAnalysis=d.analysisApproved&&this.scope.includeAnalysisInCaption===true;
     const final=includeAnalysis&&d.summaryLines?.length?composeAnalysisCaption(d.caption,d.entities,d.summaryLines,d.tags,4096):composeCaption(d.caption,d.entities,includeAnalysis?d.tags:[],4096);check(final.status==='ready','CAPTION_OVERFLOW');
     if(final.caption.length>1024){check(me.premium===true,'PREMIUM_CAPTION_REQUIRED');const app=await bounded(client.invoke(new Api.help.GetAppConfig({hash:0})));const limit=app.config?.value?.find(x=>x.key==='caption_length_limit_premium')?.value?.value;check(Number.isInteger(limit)&&limit>=final.caption.length,'CAPTION_LIMIT');}
@@ -180,11 +180,11 @@ class Service{
     check(sent?.className==='Message'&&sid(sent.fromId?.userId)===sid(this.c.expectedUserId)&&sid(utils.getPeerId(sent.peerId))===groupId&&Number(sent.replyTo?.replyToTopId||sent.replyTo?.replyToMsgId)===topicId&&sent.message===final.caption&&!sent.fwdFrom,'DELIVERY_UNCONFIRMED');
     check(sid((sent.media?.photo||sent.media?.document)?.id)===sid(original.id),'MEDIA_UNCONFIRMED');
     check(entities.every(e=>media.entityMatches(sent.entities,e)),'FORMATTING_UNCONFIRMED');
-    confirmed=true;return {messageId:mid,topicId,groupId,caption:final.caption,entities:final.captionEntities,url:'https://t.me/c/'+groupId.slice(4)+'/'+topicId+'/'+mid};
+    confirmed=true;return {messageId:mid,topicId,groupId,topicLabel:destinations.topicLabel(chosen,this.scope),caption:final.caption,entities:final.captionEntities,url:'https://t.me/c/'+groupId.slice(4)+'/'+topicId+'/'+mid};
    });
    this.store.change(d.key,x=>({...x,status:'sent',receipt,sentAt:Date.now()}));
    const mediaLabel=d.mime.startsWith('image/')?'படம்':'வீடியோ';
-   await this.tell(d.owner,receipt.url+'\n\n✅ நீங்கள் அனுப்பிய '+mediaLabel+' தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ Caption திருத்து',callback_data:'mc:'+d.key+':'+d.rev+':edit'}]]}}).then(m=>this.store.change(d.key,x=>({...x,receiptControlId:m.message_id}))).catch(()=>{});
+   await this.tell(d.owner,(receipt.topicLabel?receipt.topicLabel+'\n':'')+receipt.url+'\n\n✅ நீங்கள் அனுப்பிய '+mediaLabel+' தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ Caption திருத்து',callback_data:'mc:'+d.key+':'+d.rev+':edit'}]]}}).then(m=>this.store.change(d.key,x=>({...x,receiptControlId:m.message_id}))).catch(()=>{});
    await this.bot('editMessageReplyMarkup',{chat_id:d.owner,message_id:d.controlId,reply_markup:{inline_keyboard:[]}}).catch(()=>{});
    return {next:0,status:'sent',jobKey:d.key,messageId:receipt.messageId,topicId,groupId};
   }catch(e){

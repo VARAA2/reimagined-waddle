@@ -78,7 +78,7 @@ test('captionless and formatted media post as personal sender into selected topi
   const s=setup(t),r=await s.handle(incoming(1,{...asset,caption,caption_entities:caption?[{type:'bold',offset:3,length:4}]:[]})),d=s.store.read(r.json.jobKey),m=sender(s);
   assert.equal((await s.handle(cb(d,'t10'))).json.status,'sent');assert.equal(m.writes,1);assert.equal(m.req.message,caption);assert.equal(m.req.sendAs.className,'InputPeerSelf');assert.equal(m.req.replyTo.topMsgId,10);
   assert.equal(s.store.read(d.key).receipt.messageId,88);
-  const receipt=s.calls.find(x=>x.method==='sendMessage'&&x.body.text.startsWith('https://t.me/c/'));assert(receipt);assert(receipt.body.text.startsWith('https://t.me/c/1234500000/10/88\n\n✅'));assert(receipt.body.text.includes('படம்'));assert.equal(receipt.body.reply_to_message_id,1);assert.equal(receipt.body.disable_web_page_preview,true);
+  const receipt=s.calls.find(x=>x.method==='sendMessage'&&x.body.text.includes('https://t.me/c/'));assert(receipt);assert(receipt.body.text.startsWith('🎬 Cinema'+String.fromCharCode(10)+'https://t.me/c/1234500000/10/88\n\n✅'));assert(receipt.body.text.includes('படம்'));assert.equal(receipt.body.reply_to_message_id,1);assert.equal(receipt.body.disable_web_page_preview,true);
  }
 });
 test('uncertain delivery is persisted and cannot automatically send again',async t=>{

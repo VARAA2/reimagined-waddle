@@ -29,7 +29,7 @@ function transport(s,{wrongReadback=false,uncertain=false}={}){
  let request,writes=0,stages=0;const mediaById=new Map();
  s.stage=async d=>{stages++;const photo=new Api.Photo({id:bi(1000+d.sourceMessageId),accessHash:bi(1),fileReference:Buffer.from('x'),date:0,sizes:[],dcId:1}),media=new Api.MessageMediaPhoto({photo});mediaById.set(String(photo.id),media);return {source:{media},botMessageId:stages};};s.cleanup=async()=>{};
  const selected=[];s.group=async(client,id=primary)=>{selected.push(id);return new Api.InputPeerChannel({channelId:bi(id.slice(4)),accessHash:bi(1)});};
- const topics=[{id:10,key:10,groupId:primary,title:'Same topic'},{id:10,key:'g2234500000_10',groupId:extra,title:'Same topic'},{id:20,key:'g2234500000_20',groupId:extra,title:'Topic 20'}];s.topics=async(client,id)=>topics.filter(t=>!id||t.groupId===id);
+ const topics=[{id:10,key:10,groupId:primary,groupLabel:primary,title:'Same topic',emoji:'🎬'},{id:10,key:'g2234500000_10',groupId:extra,groupLabel:'Editor',title:'Same topic',emoji:'🎬'},{id:20,key:'g2234500000_20',groupId:extra,groupLabel:'Editor',title:'Topic 20'}];s.topics=async(client,id)=>topics.filter(t=>!id||t.groupId===id);
  const client={invoke:async req=>{request=req;writes++;req.getBytes();if(uncertain)throw Error('network lost');const items=req.multiMedia||[req];return {updates:items.map((m,i)=>({className:'UpdateMessageID',id:800+i,randomId:m.randomId}))};},getMessages:async peer=>(request.multiMedia||[request]).map((m,i)=>({className:'Message',id:800+i,fromId:new Api.PeerUser({userId:bi(42)}),peerId:new Api.PeerChannel({channelId:wrongReadback?bi(primary.slice(4)):peer.channelId}),replyTo:{replyToTopId:request.replyTo.topMsgId},message:m.message,entities:m.entities,media:mediaById.get(String(m.media.id.id)),groupedId:bi(777)}))};
  s.personal=async fn=>fn(client,{premium:true});return {get request(){return request;},get writes(){return writes;},get stages(){return stages;},selected};
 }
@@ -88,4 +88,20 @@ test('cloud layout revision applies requested default once, retains subsequent p
  assert.equal(s.store.read('topic_order_42').orderRevision,'new-layout');
  await s.handle(input(3,{text:'/topicorder'}));await press(s,'resetorder',4);
  assert.deepEqual((await s.orderedTopics('42')).map(t=>t.key),[10,30,'g2234500000_10','g2234500000_20']);
+});
+test('receipts name the topic (and the other group) on the line above the post link, also for albums and copies',async t=>{
+ const nl=String.fromCharCode(10),receipts=s=>s.calls.filter(x=>x.method==='sendMessage'&&x.body.text.includes('https://t.me/c/')).map(x=>x.body.text);
+ const s=setup(t);await s.handle(input(1,photo(1)));transport(s);
+ assert.equal((await press(s,'tg2234500000_10',2)).json.status,'sent');
+ assert(receipts(s).at(-1).startsWith('🎬 Same topic · Editor'+nl+'https://t.me/c/2234500000/10/800'+nl+nl+'✅'),receipts(s).at(-1));
+ const a=setup(t);await a.handle(input(1,{...photo(1),media_group_id:'album'}));const r=await a.handle(input(2,{...photo(2),media_group_id:'album'}));a.store.change(r.json.jobKey,d=>({...d,lastAssetAt:Date.now()-3000}));await press(a,'ready',3);transport(a);
+ assert.equal((await press(a,'tg2234500000_20',4)).json.status,'sent');
+ assert(receipts(a).at(-1).startsWith('📁 Topic 20 · Editor'+nl+'https://t.me/c/2234500000/20/800'+nl+nl+'✅ 2 media'),receipts(a).at(-1));
+ const c=setup(t);const first=await c.handle(input(1,photo(1)));transport(c);await press(c,'t10',2);
+ assert(receipts(c).at(-1).startsWith('🎬 Same topic'+nl+'https://t.me/c/1234500000/10/800'),receipts(c).at(-1));
+ const d=c.store.read(first.json.jobKey);await c.handle(input(3,{text:'x',reply_to_message:{message_id:d.sourceMessageId,from:{id:42,is_bot:false}}}));
+ const ui=c.store.read('ui_42'),choice=ui.choices.find(x=>x.action==='tg2234500000_20');assert(choice);
+ assert.equal((await c.handle(input(4,{text:choice.text,reply_to_message:{message_id:d.sourceMessageId,from:{id:42,is_bot:false}}}))).json.status,'sent');
+ assert.equal(c.store.read(c.store.read(first.json.jobKey).copies[0].key).copyOf,first.json.jobKey);
+ assert(receipts(c).at(-1).startsWith('📁 Topic 20 · Editor'+nl+'https://t.me/c/2234500000/20/800'),receipts(c).at(-1));
 });

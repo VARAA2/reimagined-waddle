@@ -233,7 +233,7 @@ function install(Service,parseMedia){
   try{
    const receipt=await this.personal(async(client,me)=>{
     destinations.assertDestination(this.scope,groupId,topicId);
-    const topics=await this.topics(client,groupId);check(topics.some(t=>destinations.matchesTopic(t,this.scope,groupId,topicId)),'TOPIC_UNAVAILABLE');
+    const topics=await this.topics(client,groupId);const chosen=topics.find(t=>destinations.matchesTopic(t,this.scope,groupId,topicId));check(chosen,'TOPIC_UNAVAILABLE');
     if(d.assets.some(a=>a.caption.length>1024)){check(me.premium===true,'PREMIUM_CAPTION_REQUIRED');const cfg=await bound(client.invoke(new Api.help.GetAppConfig({hash:0})));const max=cfg.config?.value?.find(x=>x.key==='caption_length_limit_premium')?.value?.value;check(Number.isInteger(max)&&d.assets.every(a=>a.caption.length<=max),'CAPTION_LIMIT');}
     const parts=[];
     for(const [index,asset] of d.assets.entries()){
@@ -256,10 +256,10 @@ function install(Service,parseMedia){
      check(p.entities.every(e=>media.entityMatches(message.entities,e)),'ALBUM_FORMATTING_UNCONFIRMED');
      return {messageId:ids[i],sourceMessageId:p.asset.sourceMessageId,caption:p.asset.caption,entities:p.asset.entities};
     });
-    confirmed=true;return {...items[0],messageIds:ids,items,groupedId,topicId,groupId,url:'https://t.me/c/'+groupId.slice(4)+'/'+topicId+'/'+ids[0]};
+    confirmed=true;return {...items[0],messageIds:ids,items,groupedId,topicId,groupId,topicLabel:destinations.topicLabel(chosen,this.scope),url:'https://t.me/c/'+groupId.slice(4)+'/'+topicId+'/'+ids[0]};
    });
    this.store.change(d.key,x=>({...x,status:'sent',receipt,sentAt:Date.now()}));
-   await this.tell(d.owner,receipt.url+'\n\n✅ '+d.assets.length+' media கொண்ட முழு Album தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true}).catch(()=>{});
+   await this.tell(d.owner,(receipt.topicLabel?receipt.topicLabel+'\n':'')+receipt.url+'\n\n✅ '+d.assets.length+' media கொண்ட முழு Album தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true}).catch(()=>{});
    return {next:0,status:'sent',jobKey:d.key,topicId,groupId,messageIds:receipt.messageIds,count:receipt.items.length};
   }catch(e){
    this.store.change(d.key,x=>({...x,status:started?'uncertain':'pending',lastError:/^MEDIA_[A-Z_]+$/.test(e.message)?e.message:'MEDIA_ALBUM_SEND_FAILED'}));

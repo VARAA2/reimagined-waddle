@@ -32,4 +32,6 @@ function topicTitle(t,topics){
  if(!topics.some(x=>x!==t&&x.title===t.title))return t.title;
  return t.title+' · '+(t.groupLabel||'Topic')+' · '+(t.groupId?t.groupId.slice(4)+'/':'')+t.id;
 }
-module.exports={groups,validateGroups,assertDestination,resolveDestination,topicKey,matchesTopic,topicTitle};
+// Receipt heading: topic emoji + name, plus the group name when it is not the main group.
+const topicLabel=(t,scope)=>t?(t.emoji||'📁')+' '+t.title+(t.groupId&&t.groupId!==scope.groupId?' · '+(t.groupLabel||t.groupId):''):'';
+module.exports={groups,validateGroups,assertDestination,resolveDestination,topicKey,matchesTopic,topicTitle,topicLabel};
