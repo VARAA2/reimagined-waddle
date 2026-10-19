@@ -117,10 +117,13 @@ function install(Service,parseMedia){
   const choices=[{button:{text:'🔄 Group வரிசைக்கு மாற்று'},action:'resetorder'},{button:{text:'🏠 Main Menu'},action:'home'}];
   await this.showKeyboard(owner,'↕️ உங்களுக்கான topic வரிசை\n\n'+topics.map((t,i)=>(i+1)+'. '+destinations.topicTitle(t,topics)).join('\n')+'\n\nவேண்டிய வரிசையில் எண்களை அனுப்புங்கள். உதாரணம்: 3, 1, 5, 2\nகுறிப்பிடாத topics அதன் பிறகு வரும். எந்த topic-மும் நீக்கப்படாது.',choices,choices.map(x=>[x.button]),{}, {kind:'order',topicIds:topics.map(destinations.topicKey)},RN.orderPage(topics.map(t=>destinations.topicTitle(t,topics))));
  };
- Service.prototype.home=async function(owner,lastKey){
+ Service.prototype.home=async function(owner,lastKey,afterPost=false){
   const choices=[{button:{text:'📷 Image / Video / Album'},action:'upload'},{button:{text:'🗂 காத்திருக்கும் பதிவுகள்'},action:'pending'},{button:{text:'↕️ Topic வரிசை மாற்று'},action:'order'},{button:{text:'✨ சுருக்கம் + Hashtags'},action:'analyze'},{button:{text:'ℹ️ உதவி'},action:'help'}];
   const last=this.store.read(lastKey||this.store.read('last_sent_'+owner)?.key||'none');
   if(last?.owner===owner&&last.status==='sent')choices.push({button:{text:last.albumId?'✏️ கடைசி Album முதல் Caption':'✏️ கடைசி Caption திருத்து'},action:'edit:'+last.key});
+  // After a post the receipt already says "posted": only swap the topic keyboard back with one short plain line,
+  // not the full Media Bot card (that read as a second "posted" report for every post, 20 Oct 2026).
+  if(afterPost)return this.showKeyboard(owner,'👇 அடுத்த media அனுப்பலாம்',choices,choices.map(x=>[x.button]),{disable_notification:true},{kind:'home'});
   return this.showKeyboard(owner,'📷 Image, video அல்லது 2–10 படங்கள்/வீடியோக்கள் கொண்ட Album அனுப்புங்கள்.\nTopic தேர்வு செய்ததும் @'+(this.scope.senderLabel||'personal_account')+' மூலம் பதிவிடப்படும்.\n\n✨ சுருக்கம் + Hashtags: ஒரு media-க்கு Reply செய்து /analyze அனுப்புங்கள்.',choices,choices.map(x=>[x.button]),{}, {kind:'home'},RN.home(this.scope.senderLabel));
  };
  Service.prototype.showPending=async function(owner){
@@ -232,7 +235,7 @@ function install(Service,parseMedia){
  };
  Service.prototype.publish=async function(d,topicId,groupId=this.scope.groupId){
   const result=d.albumId?await this.publishAlbum(d,topicId,groupId):await legacy.publish.call(this,d,topicId,groupId);
-  if(result.status==='sent'){this.store.change('last_sent_'+d.owner,()=>({key:d.key}));if(this.scope.replyKeyboard)await this.home(d.owner,d.key).catch(()=>{});}
+  if(result.status==='sent'){this.store.change('last_sent_'+d.owner,()=>({key:d.key}));if(this.scope.replyKeyboard)await this.home(d.owner,d.key,true).catch(()=>{});}
   return result;
  };
  Service.prototype.publishAlbum=async function(d,topicId,groupId=this.scope.groupId){

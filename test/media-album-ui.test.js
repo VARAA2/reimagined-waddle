@@ -40,6 +40,13 @@ test('album collects out of order and duplicate updates into one draft before an
 test('two operators and album identifiers never share composer state',async t=>{
  const s=setup(t);const a=await s.handle(input(1,{...photo(1),media_group_id:'same'},42)),b=await s.handle(input(1,{...photo(1),media_group_id:'same'},43));assert.notEqual(a.json.jobKey,b.json.jobKey);assert.equal(s.store.read(a.json.jobKey).owner,'42');assert.equal(s.store.read(b.json.jobKey).owner,'43');
 });
+test('after a post: one rich receipt, then only a short silent keyboard line (no second Media Bot card)',async t=>{
+ const {s}=await ready(t);transport(s);const before=s.calls.length;assert.equal((await press(s,'t10')).json.status,'sent');
+ const after=s.calls.slice(before).filter(c=>/^send/.test(c.method));
+ assert.equal(after.filter(c=>c.method==='sendRichMessage').length,1);assert(shown(after[0].body).includes('2 media'));
+ const last=after.at(-1);assert.equal(last.method,'sendMessage');assert.equal(last.body.text,'👇 அடுத்த media அனுப்பலாம்');assert.equal(last.body.disable_notification,true);
+ assert(last.body.reply_markup.keyboard.some(r=>r[0].text.startsWith('✏️')));assert.equal(s.store.read('ui_42').kind,'home');
+});
 test('ready button shows complete count and text topic selection publishes one native album as personal account',async t=>{
  const {s,key}=await ready(t),mock=transport(s);assert(shown(s.calls.at(-1).body).includes('2 media'));const result=await press(s,'t10');assert.equal(result.json.status,'sent');assert.equal(mock.writes,1);assert.equal(mock.request.sendAs.className,'InputPeerSelf');assert.equal(mock.request.replyTo.topMsgId,10);assert.deepEqual(mock.request.multiMedia.map(x=>x.message),['First','Second']);assert.equal(mock.request.multiMedia[0].entities[0].className,'MessageEntityBold');assert.equal(mock.cleaned,2);assert.equal(s.store.read(key).receipt.items.length,2);assert.equal(s.store.read('ui_42').kind,'home');
  await s.handle(input(101,{text:'Cinema'}));assert.equal(mock.writes,1);
