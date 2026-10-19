@@ -27,7 +27,7 @@ for(const kind of ['media','reply']){
   await invoke(s,kind,u);assert.equal(jobs.length,1);
   const d=jobs[0],r=create();assert.equal((await r.finish(d.key,d.rev,raw)).status,'analysis_ready');
   for(const x of sends(calls)){assert.equal(String(x.body.chat_id),gid);if(x.method==='sendMessage'){assert.equal(x.body.message_thread_id,10);assert.equal(x.body.reply_parameters.message_id,90);assert.equal(x.body.reply_parameters.allow_sending_without_reply,false);}}
-  const report=sends(calls).at(-1).body;assert.deepEqual(report.entities.map(e=>e.type),['code','code']);assert.equal(report.text.slice(report.entities[0].offset,report.entities[0].offset+report.entities[0].length),raw.summaryLines.join('\n'));assert.equal(report.reply_markup.inline_keyboard.length,0);
+  const report=sends(calls).at(-1).body,html=report.rich_message.html,shown=require('../dist/nodes/NnaMediaCollection/rich-format').plain(html);assert.equal((html.match(/type="copy_text"/g)||[]).length,2);for(const line of raw.summaryLines)assert(shown.includes(line));if(report.reply_markup)assert.equal(report.reply_markup.inline_keyboard.length,0);
  });
  test(kind+' routes cannot leak into another topic or private chat on reuse',async t=>{
   const {s,jobs,calls}=setup(t,kind),cmd=kind==='reply'?'/mediareport':'/analyze';

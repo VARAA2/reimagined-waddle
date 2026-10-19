@@ -90,18 +90,19 @@ test('cloud layout revision applies requested default once, retains subsequent p
  assert.deepEqual((await s.orderedTopics('42')).map(t=>t.key),[10,30,'g2234500000_10','g2234500000_20']);
 });
 test('receipts name the topic (and the other group) on the line above the post link, also for albums and copies',async t=>{
- const nl=String.fromCharCode(10),receipts=s=>s.calls.filter(x=>x.method==='sendMessage'&&x.body.text.includes('https://t.me/c/')).map(x=>x.body.text);
+ const nl=String.fromCharCode(10),receipts=s=>s.calls.filter(x=>x.method==='sendRichMessage'&&x.body.rich_message.html.includes('https://t.me/c/')).map(x=>x.body.rich_message.html);
+ const has=(html,label,url,more='')=>require('../dist/nodes/NnaMediaCollection/rich-format').plain(html).includes(label)&&html.includes(url)&&require('../dist/nodes/NnaMediaCollection/rich-format').plain(html).includes(more);
  const s=setup(t);await s.handle(input(1,photo(1)));transport(s);
  assert.equal((await press(s,'tg2234500000_10',2)).json.status,'sent');
- assert(receipts(s).at(-1).startsWith('🎬 Same topic · Editor'+nl+'https://t.me/c/2234500000/10/800'+nl+nl+'✅'),receipts(s).at(-1));
+ assert(has(receipts(s).at(-1),'Same topic · Editor','https://t.me/c/2234500000/10/800'),receipts(s).at(-1));
  const a=setup(t);await a.handle(input(1,{...photo(1),media_group_id:'album'}));const r=await a.handle(input(2,{...photo(2),media_group_id:'album'}));a.store.change(r.json.jobKey,d=>({...d,lastAssetAt:Date.now()-3000}));await press(a,'ready',3);transport(a);
  assert.equal((await press(a,'tg2234500000_20',4)).json.status,'sent');
- assert(receipts(a).at(-1).startsWith('📁 Topic 20 · Editor'+nl+'https://t.me/c/2234500000/20/800'+nl+nl+'✅ 2 media'),receipts(a).at(-1));
+ assert(has(receipts(a).at(-1),'Topic 20 · Editor','https://t.me/c/2234500000/20/800','2 media'),receipts(a).at(-1));
  const c=setup(t);const first=await c.handle(input(1,photo(1)));transport(c);await press(c,'t10',2);
- assert(receipts(c).at(-1).startsWith('🎬 Same topic'+nl+'https://t.me/c/1234500000/10/800'),receipts(c).at(-1));
+ assert(has(receipts(c).at(-1),'Same topic','https://t.me/c/1234500000/10/800'),receipts(c).at(-1));
  const d=c.store.read(first.json.jobKey);await c.handle(input(3,{text:'x',reply_to_message:{message_id:d.sourceMessageId,from:{id:42,is_bot:false}}}));
  const ui=c.store.read('ui_42'),choice=ui.choices.find(x=>x.action==='tg2234500000_20');assert(choice);
  assert.equal((await c.handle(input(4,{text:choice.text,reply_to_message:{message_id:d.sourceMessageId,from:{id:42,is_bot:false}}}))).json.status,'sent');
  assert.equal(c.store.read(c.store.read(first.json.jobKey).copies[0].key).copyOf,first.json.jobKey);
- assert(receipts(c).at(-1).startsWith('📁 Topic 20 · Editor'+nl+'https://t.me/c/2234500000/20/800'),receipts(c).at(-1));
+ assert(has(receipts(c).at(-1),'Topic 20 · Editor','https://t.me/c/2234500000/20/800'),receipts(c).at(-1));
 });

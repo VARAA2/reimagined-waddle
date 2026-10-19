@@ -60,7 +60,9 @@ test('both private display paths emit exactly two independent complete native mo
  const summary=['A café sign glows beside a lamp 💡 and symbols < > & ` stay literal.','The scene has a peaceful mood.','Light contrasts with the dark background.'];const tags=['#Peace','#Light','#தமிழ்','#Art'];
  for(const analysisOnly of [true,false]){
   const s=setup(t);s.personal=async f=>f({});s.topics=async()=>[{id:10,title:'Art'}];const d={key:'a'.repeat(20),owner:'42',rev:1,status:analysisOnly?'analysed':'pending',analysisOnly,analysisApproved:true,summaryLines:summary,tags,sourceMessageId:100};s.store.change(d.key,()=>d);await s.display(d);
-  const b=s.calls.at(-1).body;assert.equal(b.entities.length,2);assert.deepEqual(b.entities.map(e=>e.type),['code','code']);assert.deepEqual(b.entities.map(e=>b.text.slice(e.offset,e.offset+e.length)),[summary.join('\n'),tags.join(' ')]);assert(!b.parse_mode);
+  const b=s.calls.at(-1).body;
+  if(analysisOnly){const html=b.rich_message.html,shown=require('../dist/nodes/NnaMediaCollection/rich-format').plain(html);assert.equal((html.match(/type="copy_text"/g)||[]).length,2);for(const line of summary)assert(shown.includes(line));for(const tag of tags)assert(shown.includes(tag));assert(html.includes('&lt; &gt; &amp;'));continue;}
+  assert.equal(b.entities.length,2);assert.deepEqual(b.entities.map(e=>e.type),['code','code']);assert.deepEqual(b.entities.map(e=>b.text.slice(e.offset,e.offset+e.length)),[summary.join('\n'),tags.join(' ')]);assert(!b.parse_mode);
   if(!analysisOnly)assert(b.reply_markup.keyboard.length>0);
  }
 });

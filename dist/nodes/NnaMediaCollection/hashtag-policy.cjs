@@ -108,17 +108,17 @@ function summaryLines(analysis) {
   const lines = analysis?.summaryLines;
   if (!Array.isArray(lines) || lines.length < 3 || lines.length > 4
       || !lines.every(s => typeof s === 'string' && s.trim().length > 0
-        && s.trim().length <= 160 && !/[\r\n#]/.test(s) && !/https?:\/\//i.test(s)
+        && s.trim().length <= 220 && !/[\r\n#]/.test(s) && !/https?:\/\//i.test(s)
         && /[A-Za-z]/.test(s)
         && (s.match(/\p{L}/gu) || []).every(letter => /\p{Script=Latin}/u.test(letter)))
-      || lines.join('\n').length > 600) {
+      || lines.join('\n').length > 900) {
     throw new Error('INVALID_SUMMARY');
   }
   return lines.map(s => s.trim());
 }
 
 function composeAnalysisCaption(original, entities, summary, tags, limit = 1024) {
-  const lines = summaryLines({summaryLines: summary});
+  const lines = summaryLines({summaryLines: summary}).map(s => s.replace(/\*\*/g, ''));   // yellow marks are for reports only
   const base = original + (original ? '\n\n' : '') + lines.join('\n');
   const result = composeCaption(base, entities, tags, limit);
   if (result.status !== 'ready') return {...result, caption: original};
@@ -130,7 +130,7 @@ function composeAnalysisCaption(original, entities, summary, tags, limit = 1024)
 // JS string offsets are UTF-16 code units, as required by Telegram MessageEntity.
 function composeAnalysisReport(draft) {
   if (!draft.analysisApproved) return {text: '', entities: []};
-  const summary = (draft.summaryLines || []).join('\n');
+  const summary = (draft.summaryLines || []).join('\n').replace(/\*\*/g, '');
   const hashtags = (draft.tags || []).join(' ');
   const text = summary + '\n\n' + hashtags;
   const entities = [];

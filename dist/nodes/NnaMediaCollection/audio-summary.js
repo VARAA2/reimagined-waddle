@@ -69,7 +69,12 @@ function install(Service,authenticate){
    const parts=['🎙️ Audio Summary','👤 அனுப்பியவர்: '+d.sender,'🕐 '+when+' IST','⏱️ '+Math.floor(d.duration/60)+':'+String(d.duration%60).padStart(2,'0'),'','📝 சுருக்கம்',parsed.summary_ta,'','📌 முக்கிய குறிப்புகள்',...parsed.key_points_ta.map(x=>'• '+x)];
    if(parsed.uncertainties_ta.length)parts.push('','🔎 தெளிவில்லாத பகுதிகள்',...parsed.uncertainties_ta.map(x=>'• '+x));
    if(d.replyContext)parts.push('','https://t.me/c/'+d.replyContext.chatId.slice(4)+'/'+(d.replyContext.topicId||1)+'/'+d.sourceMessageId);
-   const text=parts.join('\n');for(let i=0;i<text.length;i+=3500)await this.tell(d.owner,text.slice(i,i+3500),{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:false},link_preview_options:{is_disabled:true}});
+   const text=parts.join('\n').replace(/\*\*/g,''),sourceUrl=d.replyContext?'https://t.me/c/'+d.replyContext.chatId.slice(4)+'/'+(d.replyContext.topicId||1)+'/'+d.sourceMessageId:'';
+   // one message in the locked NNA rich look (user, 19 Oct 2026); if Telegram refuses it, the old plain pieces
+   const html=require('./rich-reports').audioPage({sender:d.sender,senderId:d.senderId,when,duration:d.duration,summary:parsed.summary_ta,points:parsed.key_points_ta,unclear:parsed.uncertainties_ta,sourceUrl});
+   const extra={reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:false}};
+   let rich=html.length<=30000;if(rich)try{await this.bot('sendRichMessage',{chat_id:d.owner,rich_message:{html},...extra});}catch{rich=false;}
+   if(!rich)for(let i=0;i<text.length;i+=3500)await this.tell(d.owner,text.slice(i,i+3500),{...extra,link_preview_options:{is_disabled:true}});
    this.store.change(key,x=>({...x,status:'complete'}));return {status:'audio_ready'};
   }finally{await feedback.complete(this,key,rev,'complete').catch(()=>{});}
  };

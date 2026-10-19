@@ -18,7 +18,7 @@ test('previously returned tags reuse their stored spelling and count as known',(
 test('English summary has three or four short lines and rejects non-Latin or mixed-script text',()=>{
   const valid=['A lit lamp stands inside a stone lantern.','Clouds and rays of light fill the background.','The artwork creates a peaceful atmosphere.'];assert.deepEqual(summaryLines({summaryLines:valid}),valid);
   assert.deepEqual(summaryLines({summaryLines:[...valid,'A café sign is visible.']}),[...valid,'A café sign is visible.']);
-  for(const lines of [[],valid.slice(0,2),[...valid,'Fourth line.','Fifth line.'],['1','2','3'],['First\nsecond',...valid.slice(1)],['#Nature',...valid.slice(1)],['https://example.test image',...valid.slice(1)],['இது ஒரு படம்.',...valid.slice(1)],['A தமிழ் lamp.',...valid.slice(1)],['दीपक',...valid.slice(1)],['A 灯笼.',...valid.slice(1)],['x'.repeat(161),...valid.slice(1)]])assert.throws(()=>summaryLines({summaryLines:lines}),/INVALID_SUMMARY/);
+  for(const lines of [[],valid.slice(0,2),[...valid,'Fourth line.','Fifth line.'],['1','2','3'],['First\nsecond',...valid.slice(1)],['#Nature',...valid.slice(1)],['https://example.test image',...valid.slice(1)],['இது ஒரு படம்.',...valid.slice(1)],['A தமிழ் lamp.',...valid.slice(1)],['दीपक',...valid.slice(1)],['A 灯笼.',...valid.slice(1)],['x'.repeat(221),...valid.slice(1)]])assert.throws(()=>summaryLines({summaryLines:lines}),/INVALID_SUMMARY/);
 });
 test('optional summary caption composition preserves original entities and fails without truncation',()=>{
   const lines=['A lamp is visible.','Clouds fill the sky.','The image conveys peace.'];const original='🙏 Original',entities=[{type:'bold',offset:3,length:8}];

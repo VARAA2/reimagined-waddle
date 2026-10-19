@@ -10,6 +10,7 @@ const {selectHashtags,composeCaption,summaryLines,composeAnalysisCaption,compose
 const bank=require('./hashtag-bank.json');
 const prompt=require('./prompt.json');
 const feedback=require('./processing-feedback');
+const RF=require('./rich-format'),RR=require('./rich-reports');
 const check=(ok,code)=>{if(!ok)throw Error('MEDIA_'+code);};
 const sid=x=>String(x??'');
 const positive=x=>Number.isSafeInteger(x)&&x>0;
@@ -116,6 +117,13 @@ class Service{
   const retryCommand=this.scope.analysisCommand==='mediareport'?'/mediareport':'/analyze';
   const text=d.analysisOnly?(state||'Analysis முடிவு கிடைக்கவில்லை. இந்த media-க்கு Reply செய்து '+retryCommand+' கொடுத்து மீண்டும் முயற்சிக்கலாம்.'):(state?state+'\n\n':'')+'📍 எந்த topic-ல் பதிவிட வேண்டும்?';
   const markup=d.analysisOnly?{inline_keyboard:[]}:keyboard(d,topics,page);
+  if(d.analysisOnly&&state){   // locked NNA rich look (user, 19 Oct 2026); plain text if Telegram refuses it
+   const r=d.replyContext,sourceUrl=r?'https://t.me/c/'+r.chatId.slice(4)+'/'+(r.topicId||1)+'/'+d.sourceMessageId:'';
+   const html=RR.reportPage({summaryLines:d.summaryLines||[],tags:d.tags||[],kind:String(d.mime||'').startsWith('video/')?'video':'image',sourceUrl,groupLabel:r?'#NNA group':'#NNA Media bot'});
+   if(d.controlId)await RF.send(this,d.owner,html,{messageId:d.controlId,extra:{reply_markup:markup},fallback:text,fallbackExtra:{entities:report.entities,reply_markup:markup}});
+   else{const m=await RF.send(this,d.owner,html,{extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:text,fallbackExtra:{entities:report.entities,reply_to_message_id:d.sourceMessageId}});this.store.change(d.key,x=>({...x,controlId:m.message_id}));}
+   return;
+  }
   if(d.controlId)await this.bot('editMessageText',{chat_id:d.owner,message_id:d.controlId,text,entities:report.entities,reply_markup:markup});
   else{const m=await this.tell(d.owner,text,{entities:report.entities,reply_to_message_id:d.sourceMessageId,reply_markup:markup});this.store.change(d.key,x=>({...x,controlId:m.message_id}));}
  }
@@ -184,7 +192,11 @@ class Service{
    });
    this.store.change(d.key,x=>({...x,status:'sent',receipt,sentAt:Date.now()}));
    const mediaLabel=d.mime.startsWith('image/')?'படம்':'வீடியோ';
-   await this.tell(d.owner,(receipt.topicLabel?receipt.topicLabel+'\n':'')+receipt.url+'\n\n✅ நீங்கள் அனுப்பிய '+mediaLabel+' தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ Caption திருத்து',callback_data:'mc:'+d.key+':'+d.rev+':edit'}]]}}).then(m=>this.store.change(d.key,x=>({...x,receiptControlId:m.message_id}))).catch(()=>{});
+   const editData='mc:'+d.key+':'+d.rev+':edit';
+   await RF.send(this,d.owner,RR.receiptPage({kind:d.mime.startsWith('image/')?'image':'video',topicLabel:receipt.topicLabel,caption:receipt.caption,url:receipt.url,editData,groupLabel:destinations.groups(this.scope).find(g=>g.groupId===groupId)?.label||'#NNA MEDIA COLLECTION'}),
+    {extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:(receipt.topicLabel?receipt.topicLabel+'\n':'')+receipt.url+'\n\n✅ நீங்கள் அனுப்பிய '+mediaLabel+' தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',
+     fallbackExtra:{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ Caption திருத்து',callback_data:editData}]]}}})
+    .then(m=>this.store.change(d.key,x=>({...x,receiptControlId:m.message_id}))).catch(()=>{});
    await this.bot('editMessageReplyMarkup',{chat_id:d.owner,message_id:d.controlId,reply_markup:{inline_keyboard:[]}}).catch(()=>{});
    return {next:0,status:'sent',jobKey:d.key,messageId:receipt.messageId,topicId,groupId};
   }catch(e){
@@ -219,7 +231,10 @@ class Service{
     const [sent]=await bounded(client.getMessages(peer,{ids:[d.receipt.messageId]}));check(sent?.message===caption&&entities.every(e=>media.entityMatches(sent.entities,e)),'EDIT_UNCONFIRMED');
    });
    this.store.change(d.key,x=>({...x,status:'sent',receipt:{...x.receipt,caption,entities:x.entities}}));
-   const r=await this.tell(owner,d.receipt.url+'\n\n✅ இந்தப் பதிவின் caption திருத்தப்பட்டது.',{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ மீண்டும் திருத்து',callback_data:'mc:'+d.key+':'+d.rev+':edit'}]]}});
+   const editData='mc:'+d.key+':'+d.rev+':edit';
+   const r=await RF.send(this,owner,RR.receiptPage({kind:String(d.mime||'').startsWith('video/')?'video':'image',topicLabel:d.receipt.topicLabel,caption,url:d.receipt.url,editData,edited:true}),
+    {extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:d.receipt.url+'\n\n✅ இந்தப் பதிவின் caption திருத்தப்பட்டது.',
+     fallbackExtra:{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ மீண்டும் திருத்து',callback_data:editData}]]}}});
    this.store.change(d.key,x=>({...x,receiptControlId:r.message_id}));return {next:0,status:'edited'};
   }catch{this.store.change(d.key,x=>({...x,status:started?'uncertain':'sent'}));await this.tell(owner,'⚠️ Caption மாற்றத்தை உறுதிப்படுத்த முடியவில்லை. Group பதிவைச் சரிபாருங்கள்.');return {next:0,status:'edit_failed'};}
  }

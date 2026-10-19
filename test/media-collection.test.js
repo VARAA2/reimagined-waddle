@@ -78,7 +78,9 @@ test('captionless and formatted media post as personal sender into selected topi
   const s=setup(t),r=await s.handle(incoming(1,{...asset,caption,caption_entities:caption?[{type:'bold',offset:3,length:4}]:[]})),d=s.store.read(r.json.jobKey),m=sender(s);
   assert.equal((await s.handle(cb(d,'t10'))).json.status,'sent');assert.equal(m.writes,1);assert.equal(m.req.message,caption);assert.equal(m.req.sendAs.className,'InputPeerSelf');assert.equal(m.req.replyTo.topMsgId,10);
   assert.equal(s.store.read(d.key).receipt.messageId,88);
-  const receipt=s.calls.find(x=>x.method==='sendMessage'&&x.body.text.includes('https://t.me/c/'));assert(receipt);assert(receipt.body.text.startsWith('🎬 Cinema'+String.fromCharCode(10)+'https://t.me/c/1234500000/10/88\n\n✅'));assert(receipt.body.text.includes('படம்'));assert.equal(receipt.body.reply_to_message_id,1);assert.equal(receipt.body.disable_web_page_preview,true);
+  // receipt in the locked NNA rich look (19 Oct 2026): topic, post link as a button, reply to the upload
+  const receipt=s.calls.find(x=>x.method==='sendRichMessage'&&x.body.rich_message.html.includes('https://t.me/c/1234500000/10/88'));assert(receipt);
+  const text=require('../dist/nodes/NnaMediaCollection/rich-format').plain(receipt.body.rich_message.html);assert(text.includes('Cinema'));assert(text.includes('பதிவிடப்பட்டது'));assert.equal(receipt.body.reply_parameters.message_id,1);
  }
 });
 test('uncertain delivery is persisted and cannot automatically send again',async t=>{
@@ -112,7 +114,7 @@ test('reply analysis of a posted upload gives one combined reply without modifyi
  assert.equal((await s.handle(command)).json.next,1);assert.equal(selected.sourceMessageId,1);assert.equal(selected.analysisOnly,true);
  assert.equal((await s.handle(command)).json.status,'duplicate_analysis');
  assert.equal((await s.finish(selected.key,selected.rev,analysisResult())).status,'analysis_ready');
- const result=s.calls.at(-1).body;assert(result.text.includes(summary.join('\n')));assert(result.text.includes('#Jesus'));assert.deepEqual(result.reply_markup.inline_keyboard,[]);
+ const result=s.calls.at(-1).body,shown=require('../dist/nodes/NnaMediaCollection/rich-format').plain(result.rich_message.html);for(const line of summary)assert(shown.includes(line));assert(shown.includes('#Jesus'));if(result.reply_markup)assert.deepEqual(result.reply_markup.inline_keyboard,[]);
  const progress=s.calls.find(x=>x.method==='sendMessage'&&x.body.text.includes('தயாராகின்றன'));assert.equal(progress.body.reply_to_message_id,1);
  assert.deepEqual(s.store.read(original.key),saved);assert.equal(s.store.read(selected.key).status,'analysed');
  await assert.rejects(s.publish(selected,10),/MUST_NOT_POST/);
@@ -130,7 +132,7 @@ test('reply analysis rejects nonmedia and another private sender before download
  }
 });
 test('missing or oversized summary never produces a hashtags-only success',async t=>{
- for(const invalid of [undefined,['One line.'],['A'.repeat(161),'Second line.','Third line.'],['படத்தில் ஒரு விளக்கு உள்ளது.','மேகங்கள் உள்ளன.','அமைதி நிலவுகிறது.']]){
+ for(const invalid of [undefined,['One line.'],['A'.repeat(221),'Second line.','Third line.'],['படத்தில் ஒரு விளக்கு உள்ளது.','மேகங்கள் உள்ளன.','அமைதி நிலவுகிறது.']]){
   const s=setup(t),r=await s.handle(incoming(1,asset));s.analyze=async()=>({json:{next:1}});await s.handle(incoming(2,{text:'/analyze',reply_to_message:{message_id:1}}));
   const d=s.store.read(r.json.jobKey);assert.equal((await s.finish(d.key,d.rev,{...analysisResult(),summaryLines:invalid})).status,'analysis_failed');
   assert.equal(s.store.read(d.key).analysisApproved,false);assert.equal(s.reusedTags().length,0);
