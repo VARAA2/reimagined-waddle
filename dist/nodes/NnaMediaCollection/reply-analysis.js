@@ -1,4 +1,5 @@
 'use strict';
+const RN=require('./rich-notices');
 const {jobKey}=require('./store');
 const LABEL='🔎 Image / Video Report',CANCEL='❌ Media Report ரத்து';
 function install(Service,authenticate,parseMedia){
@@ -44,24 +45,24 @@ function install(Service,authenticate,parseMedia){
    return pass();
   }
   const {owner}=authenticate(u,this.scope,this.me.id);
-  if(m.forward_origin||m.forward_date){await this.tell(owner,'புதிய command அல்லது நீங்கள் அனுப்பிய media-க்கு Reply செய்து /mediareport பயன்படுத்துங்கள்.');return done('fresh_report_required');}
+  if(m.forward_origin||m.forward_date){await this.say(owner,RN.freshCommand('/mediareport'),'புதிய command அல்லது நீங்கள் அனுப்பிய media-க்கு Reply செய்து /mediareport பயன்படுத்துங்கள்.');return done('fresh_report_required');}
   if(cmd==='cancelmedia'){
    this.store.change(modeKey,x=>({...x,armed:false}));
    const current=this.store.read('report_active_'+owner),d=current&&this.store.read(current.key);
    if(d?.owner===owner&&d.analysisOnly&&d.status==='analysing'){this.store.change(d.key,x=>({...x,status:'cancelled',rev:x.rev+1,analysisConsent:null}));this.releaseAnalysis(d.key,d.rev);await require('./processing-feedback').complete(this,d.key,d.rev,'cancelled').catch(()=>{});}
-   await this.tell(owner,'❌ Media Report ரத்து செய்யப்பட்டது. /menu மூலம் முக்கிய menu-க்கு திரும்பலாம்.');return done('report_cancelled');
+   await this.say(owner,RN.cancelled('Media Report',[RN.backToMenu]),'❌ Media Report ரத்து செய்யப்பட்டது. /menu மூலம் முக்கிய menu-க்கு திரும்பலாம்.');return done('report_cancelled');
   }
   if(cmd==='mediareport'&&!m.reply_to_message){
    let fresh=false;this.store.change(modeKey,x=>{if(x?.updateId>=u.update_id)return undefined;fresh=true;return {armed:true,updateId:u.update_id,expiresAt:Date.now()+15*60000};});
    if(!fresh)return done('duplicate_report');
-   await this.tell(owner,'🔎 Image / Video Report\n\nஅடுத்து ஒரு image அல்லது video அனுப்புங்கள். English summary + hashtags தனித்தனியாக copy செய்யும் format-ல் கிடைக்கும்.\n\nஏற்கெனவே அனுப்பிய media-க்கு Reply செய்து /mediareport கொடுக்கலாம்.\nரத்து செய்ய: /cancelmedia',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});
+   await this.say(owner,RN.reportArmed(),'🔎 Image / Video Report\n\nஅடுத்து ஒரு image அல்லது video அனுப்புங்கள். English summary + hashtags தனித்தனியாக copy செய்யும் format-ல் கிடைக்கும்.\n\nஏற்கெனவே அனுப்பிய media-க்கு Reply செய்து /mediareport கொடுக்கலாம்.\nரத்து செய்ய: /cancelmedia',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});
    return done('report_armed');
   }
   const ref=cmd?m.reply_to_message:m;
   let asset;try{
    if(!this.replyContext&&(String(ref.from?.id)!==owner||ref.from?.is_bot))throw Error('MEDIA_REPLY_MEDIA_OWNER');
    asset=parseMedia({...ref,media_group_id:undefined});
-  }catch{await this.tell(owner,'நீங்கள் இந்த bot-க்கு அனுப்பிய image அல்லது video-க்கு Reply செய்து /mediareport கொடுங்கள்.');return done('report_media_required');}
+  }catch{await this.say(owner,RN.replyFirst('/mediareport'),'நீங்கள் இந்த bot-க்கு அனுப்பிய image அல்லது video-க்கு Reply செய்து /mediareport கொடுங்கள்.');return done('report_media_required');}
   const key=this.jobKey(owner,'report:'+ref.message_id+':'+m.message_id);let created=false,claim=false;
   if(!cmd){
    const active=this.store.change(modeKey,x=>{if(!x?.armed||x.expiresAt<=Date.now())return undefined;claim=true;return {...x,armed:false,consumedBy:key};});

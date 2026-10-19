@@ -111,4 +111,10 @@ async function send(service, chatId, html, {messageId, extra = {}, fallback, fal
       : service.tell(chatId, text, fallbackExtra);
   }
 }
-module.exports = {m, esc, mono, hl, title, pull, sub, tap, DIV, marked, line, ticks, buttons, cite, card, plain, send};
+// plain sendMessage options -> rich sendRichMessage options (reply_to -> reply_parameters; text-only options dropped)
+function richExtra(extra = {}) {
+  const {entities, disable_web_page_preview, link_preview_options, parse_mode, reply_to_message_id, allow_sending_without_reply, ...rest} = extra;
+  if (reply_to_message_id && !rest.reply_parameters) rest.reply_parameters = {message_id: reply_to_message_id, allow_sending_without_reply: allow_sending_without_reply !== false};
+  return rest;
+}
+module.exports = {m, esc, mono, hl, title, pull, sub, tap, DIV, marked, line, ticks, buttons, cite, card, plain, send, richExtra};

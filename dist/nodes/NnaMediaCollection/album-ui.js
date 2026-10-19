@@ -5,6 +5,7 @@ const {jobKey}=require('./store');
 const media=require('../NnaTelegramSender/media-publish');
 const destinations=require('./destinations');
 const {composeAnalysisReport}=require('./hashtag-policy.cjs');
+const RF=require('./rich-format'),RN=require('./rich-notices');
 const check=(ok,code)=>{if(!ok)throw Error('MEDIA_'+code);};
 const sid=x=>String(x??'');
 const positive=x=>Number.isSafeInteger(x)&&x>0;
@@ -48,18 +49,24 @@ function install(Service,parseMedia){
   }
   return legacy.startAnalysis.call(this,original,consent);
  };
- Service.prototype.keyboardSend=async function(owner,text,extra){
+ Service.prototype.keyboardSend=async function(owner,text,extra,html){
+  // locked NNA rich look (19 Oct 2026) with the same reply keyboard. Only an explicit Telegram refusal of the rich
+  // message falls back to the plain text; a transport error is never retried (it could duplicate the message).
+  const send=async x=>{
+   if(html)try{return await this.bot('sendRichMessage',{chat_id:owner,rich_message:{html},...RF.richExtra(x)});}catch(e){if(e.customEmojiRejected||!(e.telegramStatus>=400&&e.telegramStatus<500))throw e;}
+   return this.tell(owner,text,x);
+  };
   // Retry only an explicit Telegram rejection before a message was sent, never a transport error.
-  try{return await this.tell(owner,text,extra);}catch(e){
+  try{return await send(extra);}catch(e){
    if(!e.customEmojiRejected)throw e;
    this.store.change('keyboard_icons',()=>({disabled:true}));
    const clean=JSON.parse(JSON.stringify(extra));
    for(const row of clean.reply_markup?.keyboard||[])for(const b of row)delete b.icon_custom_emoji_id;
-   return this.tell(owner,text,clean);
+   return send(clean);
   }
  };
- Service.prototype.showKeyboard=async function(owner,text,choices,rows,extra={},state={}){
-  const m=await this.keyboardSend(owner,text,{...extra,reply_markup:{keyboard:rows,resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});
+ Service.prototype.showKeyboard=async function(owner,text,choices,rows,extra={},state={},html=''){
+  const m=await this.keyboardSend(owner,text,{...extra,reply_markup:{keyboard:rows,resize_keyboard:true,is_persistent:false,one_time_keyboard:false}},html);
   const ui={...state,owner,controlId:m.message_id,shownAt:Date.now(),choices:choices.map(x=>({text:x.button.text,action:x.action}))};
   this.store.change('ui_'+owner,()=>ui);
   // Remember every draft keyboard, so a Reply to an older one acts on its own media.
@@ -77,9 +84,9 @@ function install(Service,parseMedia){
  };
  Service.prototype.refuseHandled=async function(d){
   if(['pending','collecting'].includes(d.status))return null;
-  if(d.status==='sent'){await this.tell(d.owner,'✅ இந்த media ஏற்கெனவே பதிவிடப்பட்டது.'+(d.receipt?.url?'\n'+d.receipt.url:''),{disable_web_page_preview:true});return {json:{next:0,status:'already_sent',jobKey:d.key}};}
-  if(d.status==='cancelled'){await this.tell(d.owner,'❌ இந்த media ரத்து செய்யப்பட்டது. பதிவிட வேண்டுமென்றால் மீண்டும் அனுப்புங்கள்.');return {json:{next:0,status:'already_cancelled',jobKey:d.key}};}
-  await this.tell(d.owner,d.status==='analysing'?'⏳ இந்த media-க்கு analysis நடக்கிறது. முடிந்ததும் topic தேர்வு செய்யுங்கள்.':'⏳ இந்த media ஏற்கெனவே கையாளப்படுகிறது. Group-ல் சரிபாருங்கள்.');return {json:{next:0,status:'already_handled',jobKey:d.key}};
+  if(d.status==='sent'){await this.say(d.owner,RN.alreadySent(d.receipt?.url),'✅ இந்த media ஏற்கெனவே பதிவிடப்பட்டது.'+(d.receipt?.url?'\n'+d.receipt.url:''),{disable_web_page_preview:true});return {json:{next:0,status:'already_sent',jobKey:d.key}};}
+  if(d.status==='cancelled'){await this.say(d.owner,RN.alreadyCancelled(),'❌ இந்த media ரத்து செய்யப்பட்டது. பதிவிட வேண்டுமென்றால் மீண்டும் அனுப்புங்கள்.');return {json:{next:0,status:'already_cancelled',jobKey:d.key}};}
+  await this.say(d.owner,RN.busy(d.status==='analysing'),d.status==='analysing'?'⏳ இந்த media-க்கு analysis நடக்கிறது. முடிந்ததும் topic தேர்வு செய்யுங்கள்.':'⏳ இந்த media ஏற்கெனவே கையாளப்படுகிறது. Group-ல் சரிபாருங்கள்.');return {json:{next:0,status:'already_handled',jobKey:d.key}};
  };
  Service.prototype.postCopy=async function(d,action,u){
   // An already-posted media may go to more topics; never twice into the same topic.
@@ -87,11 +94,11 @@ function install(Service,parseMedia){
   const same=r=>r&&r.topicId===topicId&&(r.groupId||this.scope.groupId)===groupId;
   const copies=(d.copies||[]).map(c=>this.store.read(c.key)).filter(Boolean);
   const done=[d.receipt,...copies.filter(c=>c.status==='sent').map(c=>c.receipt)].find(same);
-  if(done){await this.tell(d.owner,'✅ இந்த media இந்த topic-ல் ஏற்கெனவே பதிவிடப்பட்டது. வேறு topic தேர்வு செய்யலாம்.'+(done.url?'\n'+done.url:''),{disable_web_page_preview:true});return {json:{next:0,status:'already_in_topic',jobKey:d.key}};}
+  if(done){await this.say(d.owner,RN.alreadySent(done.url,true),'✅ இந்த media இந்த topic-ல் ஏற்கெனவே பதிவிடப்பட்டது. வேறு topic தேர்வு செய்யலாம்.'+(done.url?'\n'+done.url:''),{disable_web_page_preview:true});return {json:{next:0,status:'already_in_topic',jobKey:d.key}};}
   const key=this.jobKey(d.owner,'copy:'+d.key+':'+groupId+':'+topicId);let claimed=false;
   const {copies:_c,receipt:_r,receiptControlId:_rc,sentAt:_s,lastError:_e,...asset}=d;
   const c=this.store.change(key,old=>{if(old&&old.status!=='pending')return undefined;claimed=true;return {...asset,key,rev:(old?.rev||0)+1,status:'sending',copyOf:d.key,controlId:0,topicId,targetGroupId:groupId,selectedAt:Date.now(),selectedUpdateId:u.update_id,createdAt:old?.createdAt||Date.now()};});
-  if(!claimed){await this.tell(d.owner,'⏳ இந்த topic-க்கான பதிவு ஏற்கெனவே நடக்கிறது அல்லது முடிவு உறுதியாகவில்லை. Group-ல் சரிபாருங்கள்.');return {json:{next:0,status:'copy_in_progress',jobKey:key}};}
+  if(!claimed){await this.say(d.owner,RN.busy(false,true),'⏳ இந்த topic-க்கான பதிவு ஏற்கெனவே நடக்கிறது அல்லது முடிவு உறுதியாகவில்லை. Group-ல் சரிபாருங்கள்.');return {json:{next:0,status:'copy_in_progress',jobKey:key}};}
   this.store.change(d.key,x=>({...x,copies:[...(x.copies||[]).filter(k=>k.key!==key),{key,topicId,groupId}].slice(-50)}));
   return {json:await this.publish(c,topicId,groupId)};
  };
@@ -108,23 +115,23 @@ function install(Service,parseMedia){
  Service.prototype.showOrder=async function(owner){
   const topics=await this.orderedTopics(owner);
   const choices=[{button:{text:'🔄 Group வரிசைக்கு மாற்று'},action:'resetorder'},{button:{text:'🏠 Main Menu'},action:'home'}];
-  await this.showKeyboard(owner,'↕️ உங்களுக்கான topic வரிசை\n\n'+topics.map((t,i)=>(i+1)+'. '+destinations.topicTitle(t,topics)).join('\n')+'\n\nவேண்டிய வரிசையில் எண்களை அனுப்புங்கள். உதாரணம்: 3, 1, 5, 2\nகுறிப்பிடாத topics அதன் பிறகு வரும். எந்த topic-மும் நீக்கப்படாது.',choices,choices.map(x=>[x.button]),{}, {kind:'order',topicIds:topics.map(destinations.topicKey)});
+  await this.showKeyboard(owner,'↕️ உங்களுக்கான topic வரிசை\n\n'+topics.map((t,i)=>(i+1)+'. '+destinations.topicTitle(t,topics)).join('\n')+'\n\nவேண்டிய வரிசையில் எண்களை அனுப்புங்கள். உதாரணம்: 3, 1, 5, 2\nகுறிப்பிடாத topics அதன் பிறகு வரும். எந்த topic-மும் நீக்கப்படாது.',choices,choices.map(x=>[x.button]),{}, {kind:'order',topicIds:topics.map(destinations.topicKey)},RN.orderPage(topics.map(t=>destinations.topicTitle(t,topics))));
  };
  Service.prototype.home=async function(owner,lastKey){
   const choices=[{button:{text:'📷 Image / Video / Album'},action:'upload'},{button:{text:'🗂 காத்திருக்கும் பதிவுகள்'},action:'pending'},{button:{text:'↕️ Topic வரிசை மாற்று'},action:'order'},{button:{text:'✨ சுருக்கம் + Hashtags'},action:'analyze'},{button:{text:'ℹ️ உதவி'},action:'help'}];
   const last=this.store.read(lastKey||this.store.read('last_sent_'+owner)?.key||'none');
   if(last?.owner===owner&&last.status==='sent')choices.push({button:{text:last.albumId?'✏️ கடைசி Album முதல் Caption':'✏️ கடைசி Caption திருத்து'},action:'edit:'+last.key});
-  return this.showKeyboard(owner,'📷 Image, video அல்லது 2–10 படங்கள்/வீடியோக்கள் கொண்ட Album அனுப்புங்கள்.\nTopic தேர்வு செய்ததும் @'+(this.scope.senderLabel||'personal_account')+' மூலம் பதிவிடப்படும்.\n\n✨ சுருக்கம் + Hashtags: ஒரு media-க்கு Reply செய்து /analyze அனுப்புங்கள்.',choices,choices.map(x=>[x.button]),{}, {kind:'home'});
+  return this.showKeyboard(owner,'📷 Image, video அல்லது 2–10 படங்கள்/வீடியோக்கள் கொண்ட Album அனுப்புங்கள்.\nTopic தேர்வு செய்ததும் @'+(this.scope.senderLabel||'personal_account')+' மூலம் பதிவிடப்படும்.\n\n✨ சுருக்கம் + Hashtags: ஒரு media-க்கு Reply செய்து /analyze அனுப்புங்கள்.',choices,choices.map(x=>[x.button]),{}, {kind:'home'},RN.home(this.scope.senderLabel));
  };
  Service.prototype.showPending=async function(owner){
   const drafts=this.pendingDrafts(owner);
   const choices=drafts.slice(0,20).map(d=>({button:{text:(d.albumId?'🖼 Album '+d.assets.length:'📷 Media')+' · '+d.sourceMessageId+(d.caption?' — '+d.caption.slice(0,35):'')},action:'draft:'+d.key}));
   choices.push({button:{text:'🏠 Main Menu'},action:'home'});
-  return this.showKeyboard(owner,drafts.length?'தொடர வேண்டிய பதிவைத் தேர்வு செய்யுங்கள்.':'காத்திருக்கும் பதிவுகள் இல்லை. புதிய media அனுப்பலாம்.',choices,choices.map(x=>[x.button]),{}, {kind:'drafts'});
+  return this.showKeyboard(owner,drafts.length?'தொடர வேண்டிய பதிவைத் தேர்வு செய்யுங்கள்.':'காத்திருக்கும் பதிவுகள் இல்லை. புதிய media அனுப்பலாம்.',choices,choices.map(x=>[x.button]),{}, {kind:'drafts'},RN.pendingList(drafts.length));
  };
  Service.prototype.showAlbumCollecting=async function(d){
   const choices=[{button:{text:'✅ Album தயார் — Topics காட்டு'},action:'ready'},{button:{text:'❌ இந்த பதிவை ரத்து செய்'},action:'cancel'},{button:{text:'🗂 காத்திருக்கும் பதிவுகள்'},action:'pending'}];
-  const m=await this.showKeyboard(d.owner,'🖼 Album பெறப்படுகிறது. எல்லா படங்கள்/வீடியோக்களும் அனுப்பி முடிந்ததும் கீழே “Album தயார்” அழுத்துங்கள்.\nஅடுத்து முழு எண்ணிக்கையும் topic பெயர்களும் காட்டப்படும்.',choices,choices.map(x=>[x.button]),{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true},{kind:'collecting',key:d.key,rev:d.rev});
+  const m=await this.showKeyboard(d.owner,'🖼 Album பெறப்படுகிறது. எல்லா படங்கள்/வீடியோக்களும் அனுப்பி முடிந்ததும் கீழே “Album தயார்” அழுத்துங்கள்.\nஅடுத்து முழு எண்ணிக்கையும் topic பெயர்களும் காட்டப்படும்.',choices,choices.map(x=>[x.button]),{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true},{kind:'collecting',key:d.key,rev:d.rev},RN.albumCollecting(d.assets?.length));
   this.store.change(d.key,x=>({...x,controlId:m.message_id}));
  };
  Service.prototype.display=async function(d,page=0){
@@ -137,7 +144,8 @@ function install(Service,parseMedia){
   const report=composeAnalysisReport(d),analysis=report.text?report.text+'\n':'';
   const label=d.albumId?'🖼 Album: '+d.assets.length+' media':'📷 Media';
   const text=analysis+label+'\n📍 எந்த topic-ல் பதிவிட வேண்டும்?'+(menu.pages>1?' ('+(menu.page+1)+'/'+menu.pages+')':'\n'+topics.length+' topics — ஒரே பட்டியல்')+(d.albumId?'\nஎல்லா '+d.assets.length+' media-வும் ஒரே album ஆக வெளியாகும்.':'');
-  const sent=await this.showKeyboard(d.owner,text,menu.choices,menu.markup.keyboard,{entities:report.entities,reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true},{kind:'topics',key:d.key,rev:d.rev,page:menu.page});
+  const sent=await this.showKeyboard(d.owner,text,menu.choices,menu.markup.keyboard,{entities:report.entities,reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true},{kind:'topics',key:d.key,rev:d.rev,page:menu.page},
+   RN.topicQuestion({kind:d.albumId?'album':String(d.mime||'').startsWith('video/')?'video':'image',count:d.assets?.length||1,summaryLines:d.summaryLines||[],tags:d.tags||[],topicCount:topics.length,page:menu.page,pages:menu.pages}));
   this.store.change(d.key,x=>({...x,controlId:sent.message_id}));
  };
  Service.prototype.receiveAlbum=async function(u,owner,m){
@@ -146,7 +154,7 @@ function install(Service,parseMedia){
   let asset;
   try{asset=parseMedia({...m,media_group_id:undefined});}catch{
    this.store.change(key,old=>old&&!['pending','collecting','blocked'].includes(old.status)?undefined:({...old,key,owner,status:'blocked',assets:old?.assets||[],lastError:'MEDIA_ALBUM_UNSUPPORTED_ITEM'}));
-   await this.tell(owner,'⚠️ Album-ல் ஆதரிக்கப்படாத file உள்ளது. இந்த album முழுவதும் பதிவிடப்படவில்லை. Image/video மட்டும் கொண்ட album அனுப்புங்கள்.');return {json:{next:0,status:'album_blocked',jobKey:key}};
+   await this.say(owner,RN.albumBlocked(false),'⚠️ Album-ல் ஆதரிக்கப்படாத file உள்ளது. இந்த album முழுவதும் பதிவிடப்படவில்லை. Image/video மட்டும் கொண்ட album அனுப்புங்கள்.');return {json:{next:0,status:'album_blocked',jobKey:key}};
   }
   const d=this.store.change(key,old=>{
    if(old?.assets?.some(x=>x.sourceMessageId===m.message_id))return undefined;
@@ -158,12 +166,12 @@ function install(Service,parseMedia){
    created=!old;added=true;
    return {...old,...assets[0],key,owner,albumId:sid(m.media_group_id),assets,rev:(old?.rev||0)+1,status:old?.status||'collecting',createdAt:old?.createdAt||Date.now(),lastAssetAt:Date.now(),analysisApproved:false,tags:[]};
   });
-  if(d?.status==='blocked'){await this.tell(owner,'⚠️ Album-ல் 2–10 media மட்டும் இருக்க வேண்டும். File/document வகையையும் photo/video வகையையும் ஒரே album-ல் கலக்க முடியாது. இந்த album பதிவிடப்படவில்லை.');return {json:{next:0,status:'album_blocked',jobKey:key}};}
-  if(late){await this.tell(owner,'⚠️ இந்த Album ஏற்கெனவே முடிக்கப்பட்டதால் தாமதமாக வந்த media சேர்க்கப்படவில்லை. முழு album எண்ணிக்கையைச் சரிபாருங்கள்.');return {json:{next:0,status:'album_late',jobKey:key}};}
+  if(d?.status==='blocked'){await this.say(owner,RN.albumBlocked(true),'⚠️ Album-ல் 2–10 media மட்டும் இருக்க வேண்டும். File/document வகையையும் photo/video வகையையும் ஒரே album-ல் கலக்க முடியாது. இந்த album பதிவிடப்படவில்லை.');return {json:{next:0,status:'album_blocked',jobKey:key}};}
+  if(late){await this.say(owner,RN.albumLate(),'⚠️ இந்த Album ஏற்கெனவே முடிக்கப்பட்டதால் தாமதமாக வந்த media சேர்க்கப்படவில்லை. முழு album எண்ணிக்கையைச் சரிபாருங்கள்.');return {json:{next:0,status:'album_late',jobKey:key}};}
   if(created){
    this.addPending(d);await this.showAlbumCollecting(d);
    let armed=false;this.store.change('mode_'+owner,x=>{if(!x?.armed)return undefined;armed=true;return {...x,armed:false};});
-   if(armed)await this.tell(owner,'Album-க்கு ஒவ்வொரு media-வையும் Reply செய்து /analyze கொடுக்கலாம். முழு Album தானாக AI-க்கு அனுப்பப்படாது.');
+   if(armed)await this.say(owner,RN.albumAnalyze(),'Album-க்கு ஒவ்வொரு media-வையும் Reply செய்து /analyze கொடுக்கலாம். முழு Album தானாக AI-க்கு அனுப்பப்படாது.');
   }else if(added&&d.status==='pending')await this.display(d);
   return {json:{next:0,status:added?'album_collecting':'duplicate',jobKey:key,count:d.assets.length}};
  };
@@ -193,7 +201,7 @@ function install(Service,parseMedia){
    if(action==='home'||action==='upload'||action==='help'){await this.home(owner);return {json:{next:0,status:'menu'}};}
    if(action==='pending'){await this.showPending(owner);return {json:{next:0,status:'draft_list'}};}
    if(action==='order'){await this.showOrder(owner);return {json:{next:0,status:'topic_order'}};}
-   if(action==='resetorder'){this.store.change('topic_order_'+owner,()=>({ids:[],orderRevision:this.scope.topicOrderRevision,updatedAt:Date.now()}));await this.tell(owner,'✅ Group-ல் தற்போது உள்ள வரிசைக்கு மாற்றப்பட்டது.');await this.home(owner);return {json:{next:0,status:'order_reset'}};}
+   if(action==='resetorder'){this.store.change('topic_order_'+owner,()=>({ids:[],orderRevision:this.scope.topicOrderRevision,updatedAt:Date.now()}));await this.say(owner,RN.orderReset(),'✅ Group-ல் தற்போது உள்ள வரிசைக்கு மாற்றப்பட்டது.');await this.home(owner);return {json:{next:0,status:'order_reset'}};}
    if(action==='analyze')return legacy.handle.call(this,{...u,message:{...m,text:'/analyze'}});
    if(action.startsWith('draft:')){d=this.store.read(action.slice(6));check(d?.owner===owner&&['collecting','pending'].includes(d.status),'DRAFT_NOT_READY');await this.display(d);return {json:{next:0,status:'draft_selected'}};}
    if(action.startsWith('edit:')){d=this.store.read(action.slice(5));check(d?.owner===owner&&d.status==='sent','STALE_EDIT');await this.requestEdit(d);return {json:{next:0,status:'await_caption'}};}
@@ -204,7 +212,7 @@ function install(Service,parseMedia){
    if(action==='cancel'){
     check(target||d.controlId===ui.controlId&&(d.status==='collecting'||d.rev===ui.rev),'STALE_KEYBOARD');
     this.store.change(d.key,x=>{check(x.rev===d.rev&&['collecting','pending','analysing'].includes(x.status),'ALREADY_HANDLED');return {...x,status:'cancelled',rev:x.rev+1};});
-    await this.tell(owner,'❌ இந்த draft ரத்து செய்யப்பட்டது.');await this.home(owner);return {json:{next:0,status:'cancelled'}};
+    await this.say(owner,RN.cancelled('draft',[[null,'Again : 📷 பதிவிட வேண்டுமென்றால், [[media]]-வை [[மீண்டும்]] அனுப்புங்கள் 🔁']]),'❌ இந்த draft ரத்து செய்யப்பட்டது.');await this.home(owner);return {json:{next:0,status:'cancelled'}};
    }
    check(target||d.rev===ui.rev&&d.controlId===ui.controlId,'STALE_KEYBOARD');
    const event={update_id:u.update_id,callback_query:{id:'keyboard-'+u.update_id,from:m.from,data:'mc:'+d.key+':'+d.rev+':'+action,message:{message_id:d.controlId,chat:m.chat,from:this.me}}};
@@ -214,9 +222,9 @@ function install(Service,parseMedia){
   }
   if(ui?.kind==='order'&&text&&!text.startsWith('/')){
    const valid=/^\d+(?:[\s,]+\d+)*$/.test(text);const numbers=valid?text.split(/[\s,]+/).map(Number):[];
-   if(!numbers.length||numbers.some(n=>!Number.isInteger(n)||n<1||n>ui.topicIds.length)||new Set(numbers).size!==numbers.length){await this.tell(owner,'⚠️ பட்டியலில் உள்ள எண்களை மட்டும், ஒவ்வொன்றையும் ஒருமுறை அனுப்புங்கள். உதாரணம்: 3, 1, 5, 2');return {json:{next:0,status:'order_invalid'}};}
+   if(!numbers.length||numbers.some(n=>!Number.isInteger(n)||n<1||n>ui.topicIds.length)||new Set(numbers).size!==numbers.length){await this.say(owner,RN.orderInvalid(),'⚠️ பட்டியலில் உள்ள எண்களை மட்டும், ஒவ்வொன்றையும் ஒருமுறை அனுப்புங்கள். உதாரணம்: 3, 1, 5, 2');return {json:{next:0,status:'order_invalid'}};}
    const selected=numbers.map(n=>ui.topicIds[n-1]),ids=[...selected,...ui.topicIds.filter(id=>!selected.includes(id))];
-   this.store.change('topic_order_'+owner,()=>({ids,orderRevision:this.scope.topicOrderRevision,updatedAt:Date.now()}));await this.tell(owner,'✅ உங்களுக்கான topic வரிசை சேமிக்கப்பட்டது. அடுத்த topic தேர்வில் இந்த வரிசை வரும்.');await this.home(owner);return {json:{next:0,status:'order_saved'}};
+   this.store.change('topic_order_'+owner,()=>({ids,orderRevision:this.scope.topicOrderRevision,updatedAt:Date.now()}));await this.say(owner,RN.orderSaved(),'✅ உங்களுக்கான topic வரிசை சேமிக்கப்பட்டது. அடுத்த topic தேர்வில் இந்த வரிசை வரும்.');await this.home(owner);return {json:{next:0,status:'order_saved'}};
   }
   if(/^\/(start|help|menu)(?:@\w+)?(?:\s|$)/.test(text)){await this.home(owner);return {json:{next:0,status:'menu'}};}
   if(target&&text&&!text.startsWith('/')){const refused=target.draft.status==='sent'?null:await this.refuseHandled(target.draft);if(refused)return refused;await this.display(target.draft);return {json:{next:0,status:'draft_selected',jobKey:target.draft.key}};}
@@ -265,7 +273,7 @@ function install(Service,parseMedia){
    return {next:0,status:'sent',jobKey:d.key,topicId,groupId,messageIds:receipt.messageIds,count:receipt.items.length};
   }catch(e){
    this.store.change(d.key,x=>({...x,status:started?'uncertain':'pending',lastError:/^MEDIA_[A-Z_]+$/.test(e.message)?e.message:'MEDIA_ALBUM_SEND_FAILED'}));
-   await this.tell(d.owner,started?'⚠️ Album பதிவின் முடிவை உறுதிப்படுத்த முடியவில்லை. மீண்டும் அனுப்புவதற்கு முன் group-ல் சரிபாருங்கள்.':'⚠️ Album பதிவிடப்படவில்லை. Topic கிடைக்கிறதா, caption அளவு சரியா என்று சரிபார்த்து மீண்டும் தேர்வு செய்யலாம்.').catch(()=>{});
+   await this.say(d.owner,started?RN.publishUncertain('Album பதிவின்'):RN.albumFailed(),started?'⚠️ Album பதிவின் முடிவை உறுதிப்படுத்த முடியவில்லை. மீண்டும் அனுப்புவதற்கு முன் group-ல் சரிபாருங்கள்.':'⚠️ Album பதிவிடப்படவில்லை. Topic கிடைக்கிறதா, caption அளவு சரியா என்று சரிபார்த்து மீண்டும் தேர்வு செய்யலாம்.').catch(()=>{});
    if(!started)await this.display(this.store.read(d.key)).catch(()=>{});
    return {next:0,status:started?'uncertain':'failed',jobKey:d.key};
   }finally{if(!started||confirmed)for(const stage of stages)await this.cleanup(stage.botMessageId).catch(()=>{});}

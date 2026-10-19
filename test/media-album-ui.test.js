@@ -1,4 +1,5 @@
 'use strict';
+const {shown,isMessage}=require('./rich-shown');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {Api}=require('teleproto'),bigInt=require('big-integer');
 const {Service}=require('../dist/nodes/NnaMediaCollection/core');
@@ -34,13 +35,13 @@ test('topic keyboard uses real custom icon identifiers and one topic per row wit
 });
 test('album collects out of order and duplicate updates into one draft before any send',async t=>{
  const s=setup(t);let published=0;s.publish=async()=>{published++;};const one=await s.handle(input(2,{...photo(2),media_group_id:'g'}));await s.handle(input(1,{...photo(1),media_group_id:'g'}));await s.handle(input(2,{...photo(2),media_group_id:'g'}));
- const d=s.store.read(one.json.jobKey);assert.equal(d.status,'collecting');assert.deepEqual(d.assets.map(x=>x.sourceMessageId),[1,2]);assert.equal(published,0);assert.equal(s.calls.filter(c=>c.method==='sendMessage').length,1);
+ const d=s.store.read(one.json.jobKey);assert.equal(d.status,'collecting');assert.deepEqual(d.assets.map(x=>x.sourceMessageId),[1,2]);assert.equal(published,0);assert.equal(s.calls.filter(isMessage).length,1);
 });
 test('two operators and album identifiers never share composer state',async t=>{
  const s=setup(t);const a=await s.handle(input(1,{...photo(1),media_group_id:'same'},42)),b=await s.handle(input(1,{...photo(1),media_group_id:'same'},43));assert.notEqual(a.json.jobKey,b.json.jobKey);assert.equal(s.store.read(a.json.jobKey).owner,'42');assert.equal(s.store.read(b.json.jobKey).owner,'43');
 });
 test('ready button shows complete count and text topic selection publishes one native album as personal account',async t=>{
- const {s,key}=await ready(t),mock=transport(s);assert(s.calls.at(-1).body.text.includes('2 media'));const result=await press(s,'t10');assert.equal(result.json.status,'sent');assert.equal(mock.writes,1);assert.equal(mock.request.sendAs.className,'InputPeerSelf');assert.equal(mock.request.replyTo.topMsgId,10);assert.deepEqual(mock.request.multiMedia.map(x=>x.message),['First','Second']);assert.equal(mock.request.multiMedia[0].entities[0].className,'MessageEntityBold');assert.equal(mock.cleaned,2);assert.equal(s.store.read(key).receipt.items.length,2);assert.equal(s.store.read('ui_42').kind,'home');
+ const {s,key}=await ready(t),mock=transport(s);assert(shown(s.calls.at(-1).body).includes('2 media'));const result=await press(s,'t10');assert.equal(result.json.status,'sent');assert.equal(mock.writes,1);assert.equal(mock.request.sendAs.className,'InputPeerSelf');assert.equal(mock.request.replyTo.topMsgId,10);assert.deepEqual(mock.request.multiMedia.map(x=>x.message),['First','Second']);assert.equal(mock.request.multiMedia[0].entities[0].className,'MessageEntityBold');assert.equal(mock.cleaned,2);assert.equal(s.store.read(key).receipt.items.length,2);assert.equal(s.store.read('ui_42').kind,'home');
  await s.handle(input(101,{text:'Cinema'}));assert.equal(mock.writes,1);
 });
 test('album with no captions is supported',async t=>{
@@ -72,8 +73,8 @@ test('topic pages preserve selected draft and old replied-to keyboard is rejecte
  const s=setup(t);s.topics=async()=>Array.from({length:30},(_,i)=>({id:10+i,title:'Topic '+i}));await s.handle(input(1,photo(1)));const old=s.store.read('ui_42');await press(s,'p1',2);const next=s.store.read('ui_42');assert.equal(next.key,old.key);assert.equal(next.page,1);assert.notEqual(next.controlId,old.controlId);await assert.rejects(s.handle(input(3,{text:next.choices[0].text,reply_to_message:{message_id:old.controlId}})),/STALE_KEYBOARD/);
 });
 test('custom emoji fallback only retries an explicit rejection and keeps button text mapping',async t=>{
- const s=setup(t);let tries=0;const base=s.tell;s.tell=async function(...args){tries++;if(tries===1){const e=Error('rejected');e.customEmojiRejected=true;throw e;}return base.apply(this,args);};await s.handle(input(1,photo(1)));assert.equal(tries,2);assert.equal(s.store.read('keyboard_icons').disabled,true);assert(!s.calls.at(-1).body.reply_markup.keyboard[0][0].icon_custom_emoji_id);
- const s2=setup(t);let calls=0;s2.tell=async()=>{calls++;throw Error('timeout');};await assert.rejects(s2.handle(input(1,photo(1))),/timeout/);assert.equal(calls,1);
+ const s=setup(t);let tries=0;const base=s.bot;s.bot=async function(method,body){if(method==='sendRichMessage'&&body.reply_markup?.keyboard){tries++;if(tries===1){const e=Error('rejected');e.customEmojiRejected=true;throw e;}}return base.call(this,method,body);};await s.handle(input(1,photo(1)));assert.equal(tries,2);assert.equal(s.store.read('keyboard_icons').disabled,true);assert(!s.calls.at(-1).body.reply_markup.keyboard[0][0].icon_custom_emoji_id);
+ const s2=setup(t);let calls=0;const b2=s2.bot;s2.bot=async function(method,body){if(method==='sendRichMessage'||method==='sendMessage'){calls++;throw Error('timeout');}return b2.call(this,method,body);};await assert.rejects(s2.handle(input(1,photo(1))),/timeout/);assert.equal(calls,1);
 });
 test('album cancellation and pending draft switch use only the owning private keyboard',async t=>{
  const s=setup(t);const a=await s.handle(input(1,{...photo(1),media_group_id:'cancel'}));await press(s,'cancel',2);assert.equal(s.store.read(a.json.jobKey).status,'cancelled');assert.equal(s.store.read('ui_42').kind,'home');await s.handle(input(3,photo(3)));await press(s,'pending',4);assert.equal(s.store.read('ui_42').kind,'drafts');const choice=s.store.read('ui_42').choices.find(x=>x.action.startsWith('draft:'));await s.handle(input(5,{text:choice.text}));assert.equal(s.store.read('ui_42').kind,'topics');
@@ -111,7 +112,7 @@ test('plain tap without reply still posts the latest media',async t=>{
 test('already posted or cancelled media refuse politely through old keyboard or media reply',async t=>{
  const {s,keys,sent}=await three(t);const k1=s.store.read(keys[0]),k2=s.store.read(keys[1]);const text=topic(s,k1.key,'News');
  await s.handle(input(10,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(sent.length,1);
- const again=await s.handle(input(11,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(again.json.status,'already_in_topic');assert.equal(sent.length,1);assert(s.calls.at(-1).body.text.includes('ஏற்கெனவே பதிவிடப்பட்டது'));
+ const again=await s.handle(input(11,{text,reply_to_message:{message_id:k1.controlId,from:fromBot}}));assert.equal(again.json.status,'already_in_topic');assert.equal(sent.length,1);assert(shown(s.calls.at(-1).body).includes('ஏற்கெனவே பதிவிடப்பட்டது'));
  const viaMedia=await s.handle(input(12,{text:'News',reply_to_message:{message_id:1,from:fromOwner}}));assert.equal(viaMedia.json.status,'draft_selected');assert.equal(s.store.read('ui_42').key,keys[0]);
  const cancel=s.store.read('kbd_42_'+k2.controlId).choices.find(x=>x.action==='cancel').text;
  assert.equal((await s.handle(input(13,{text:cancel,reply_to_message:{message_id:k2.controlId,from:fromBot}}))).json.status,'cancelled');assert.equal(s.store.read(keys[1]).status,'cancelled');assert.equal(s.store.read(keys[2]).status,'pending');
@@ -173,4 +174,10 @@ test('a copy that failed before sending can be retried, one in flight is not sen
  fail=false;assert.equal((await s.handle(input(12,{text:topic(s,k1.key,'Cinema'),reply_to_message:{message_id:k1.controlId,from:fromBot}}))).json.status,'sent');assert.equal(sent.length,2);
  const key=sent[1].key;s.store.change(key,x=>({...x,status:'sending'}));s.store.change(keys[0],x=>({...x,copies:[]}));
  assert.equal((await s.handle(input(13,{text:topic(s,k1.key,'Cinema'),reply_to_message:{message_id:k1.controlId,from:fromBot}}))).json.status,'copy_in_progress');assert.equal(sent.length,2);
+});
+test('an explicit Telegram refusal of the rich topic question falls back to plain text with the same keyboard',async t=>{
+ const s=setup(t);const base=s.bot;s.bot=async function(method,body){if(method==='sendRichMessage'){s.calls.push({method,body});const e=Error('rich refused');e.telegramStatus=400;throw e;}return base.call(this,method,body);};
+ await s.handle(input(1,photo(1)));const rich=s.calls.filter(c=>c.method==='sendRichMessage'),plain=s.calls.filter(c=>c.method==='sendMessage');
+ assert.equal(rich.length,1);assert.equal(plain.length,1);assert.deepEqual(rich[0].body.reply_markup,plain[0].body.reply_markup);assert(plain[0].body.text.includes('எந்த topic-ல் பதிவிட வேண்டும்?'));
+ assert.equal(rich[0].body.reply_parameters.message_id,1);assert.equal(rich[0].body.reply_to_message_id,undefined);
 });

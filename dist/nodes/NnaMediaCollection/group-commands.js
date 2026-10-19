@@ -55,7 +55,9 @@ function install(Service){
    this.store.change(key,old=>{if(old)return undefined;claimed=true;return {status:'sending',createdAt:Date.now()};});
    if(!claimed)return ignored('duplicate_group_command');
    try{
-    const sent=await this.bot('sendMessage',{chat_id:chat.id,...(m.is_topic_message&&Number.isSafeInteger(m.message_thread_id)&&m.message_thread_id>0?{message_thread_id:m.message_thread_id}:{}),reply_parameters:{message_id:m.message_id},text:'இந்த வசதியை @'+this.scope.botUsername+' தனிப்பட்ட chat-ல் திறக்க கீழே அழுத்துங்கள்.',reply_markup:{inline_keyboard:[[{text:'↗️ /'+name,url:'https://t.me/'+this.scope.botUsername+'?start='+name}]]}});
+    // locked NNA rich look (19 Oct 2026); only an explicit Telegram refusal falls back to the plain text
+    const body={chat_id:chat.id,...(m.is_topic_message&&Number.isSafeInteger(m.message_thread_id)&&m.message_thread_id>0?{message_thread_id:m.message_thread_id}:{}),reply_parameters:{message_id:m.message_id},text:'இந்த வசதியை @'+this.scope.botUsername+' தனிப்பட்ட chat-ல் திறக்க கீழே அழுத்துங்கள்.',reply_markup:{inline_keyboard:[[{text:'↗️ /'+name,url:'https://t.me/'+this.scope.botUsername+'?start='+name}]]}},html=require('./rich-notices').openPrivate(this.scope.botUsername);
+    const sent=await (async()=>{try{const {text,...rest}=body;return await this.bot('sendRichMessage',{...rest,rich_message:{html}});}catch(e){if(!(e.telegramStatus>=400&&e.telegramStatus<500))throw e;return this.bot('sendMessage',body);}})();
     this.store.change(key,x=>({...x,status:'sent',messageId:sent.message_id}));
     return ignored('group_menu');
    }catch(e){this.store.change(key,x=>({...x,status:'uncertain'}));throw e;}

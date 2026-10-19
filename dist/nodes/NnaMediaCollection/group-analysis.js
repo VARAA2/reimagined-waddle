@@ -1,4 +1,5 @@
 'use strict';
+const RN=require('./rich-notices');
 const context=require('./group-context'),{jobKey}=require('./store');
 function install(Service){
  for(const operation of ['handle','handleAnalysis']){
@@ -26,7 +27,7 @@ function install(Service){
     const mode=this.store.read('mode_'+r.owner);if(mode?.armed&&mode.expiresAt>Date.now()){
      this.store.change('mode_'+r.owner,x=>({...x,armed:false}));
      decoded={...decoded,message:{...decoded.message,media_group_id:undefined,text:'/analyze',reply_to_message:decoded.message}};
-    }else{await this.tell(r.owner,'இந்த media-க்கு Reply செய்து /analyze@'+this.scope.botUsername+' அனுப்புங்கள்.');return {json:{next:0,status:'group_analysis_command_required'}};}
+    }else{await this.say(r.owner,RN.replyFirst('/analyze@'+this.scope.botUsername),'இந்த media-க்கு Reply செய்து /analyze@'+this.scope.botUsername+' அனுப்புங்கள்.');return {json:{next:0,status:'group_analysis_command_required'}};}
    }
    return original.call(this,decoded);
  };
@@ -34,7 +35,7 @@ function install(Service){
  const home=Service.prototype.home;
  Service.prototype.home=async function(owner,...args){
   if(!this.replyContext)return home.call(this,owner,...args);
-  return this.tell(owner,'🔎 Group Image / Video Analysis\n\nImage அல்லது video-க்கு Reply செய்து /analyze@'+this.scope.botUsername+' அனுப்புங்கள். முடிவு இதே topic-ல் அந்த media-க்கு Reply ஆக வரும்.\n\nTopic வரிசை மற்றும் media publishing தனிப்பட்ட chat-ல் தொடரும்.',{reply_markup:{inline_keyboard:[[{text:'↗️ தனிப்பட்ட Media menu',url:'https://t.me/'+this.scope.botUsername+'?start=menu'}]]}});
+  return this.say(owner,RN.groupAnalysisMenu(this.scope.botUsername),'🔎 Group Image / Video Analysis\n\nImage அல்லது video-க்கு Reply செய்து /analyze@'+this.scope.botUsername+' அனுப்புங்கள். முடிவு இதே topic-ல் அந்த media-க்கு Reply ஆக வரும்.\n\nTopic வரிசை மற்றும் media publishing தனிப்பட்ட chat-ல் தொடரும்.',{reply_markup:{inline_keyboard:[[{text:'↗️ தனிப்பட்ட Media menu',url:'https://t.me/'+this.scope.botUsername+'?start=menu'}]]}});
  };
  Service.prototype.jobKey=function(owner,message){return jobKey(this.me.id,owner,this.replyContext?this.replyContext.tag+':'+message:message);};
  const finish=Service.prototype.finish,analyze=Service.prototype.analyze;

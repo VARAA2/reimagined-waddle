@@ -6,6 +6,7 @@ const {Store}=require('../NnaMediaCollection/store');
 const model=require('./model'),{check}=model,{Api}=require('teleproto');
 const crypto=require('node:crypto'),path=require('node:path'),os=require('node:os');
 const sid=x=>String(x??''),clone=x=>JSON.parse(JSON.stringify(x));
+const RF=require('../NnaMediaCollection/rich-format'),PP=require('./rich-pages');
 const homeRows=[['📤 Image / Video பகிர்','📁 Media + Article'],['🗳️ Poll / Quiz / Checklist'],['🔎 Image / Video Report'],['🎙️ Audio Summary'],['📡 Live Schedule','📄 User Chat History'],['📚 Templates'],['💾 புதிதாகச் சேமி','✏️ மாற்று']];
 const groupLaunch=/^\/(menu|poll|quiz|checklist|polltemplates|polltopics|share|bundle|live|history|templates|save|edit)$/i;
 const homeCommands={'📚 Poll Templates':'/polltemplates','📤 Image / Video பகிர்':'/share','📁 Media + Article':'/bundle','🗳️ Poll / Quiz / Checklist':'/poll','📡 Live Schedule':'/live','📄 User Chat History':'/history','📚 Templates':'/templates','💾 புதிதாகச் சேமி':'/save','✏️ மாற்று':'/edit','🏠 Main Menu':'/menu'};
@@ -59,7 +60,7 @@ class Service{
   this.store=new Store(scope.botId,deps.root||path.join(process.env.N8N_USER_FOLDER||os.homedir(),'.n8n','nna-poll-studio',sid(scope.botId)));
   this.store.change('topics',x=>x||{targets:clone(scope.defaultTargets)});
  }
- async bot(method,body={}){try{const r=await this.ctx.helpers.httpRequest({method:'POST',url:'https://api.telegram.org/bot'+this.b.accessToken+'/'+method,body,json:true,timeout:25000});check(r?.ok,'BOT_RESPONSE');return r.result;}catch{throw Error('POLL_BOT_'+method.toUpperCase()+'_FAILED');}}
+ async bot(method,body={}){try{const r=await this.ctx.helpers.httpRequest({method:'POST',url:'https://api.telegram.org/bot'+this.b.accessToken+'/'+method,body,json:true,timeout:25000});check(r?.ok,'BOT_RESPONSE');return r.result;}catch(cause){const e=Error('POLL_BOT_'+method.toUpperCase()+'_FAILED'),status=cause?.statusCode||cause?.response?.status||cause?.response?.statusCode;if(Number.isInteger(status))e.telegramStatus=status;throw e;}}
  async init(){const me=await this.bot('getMe');check(sid(me.id)===sid(this.scope.botId)&&me.username?.toLowerCase()===this.scope.botUsername.toLowerCase(),'BOT_IDENTITY');return this;}
  async personal(fn){let client;try{client=await(this.deps.createClient||createClient)(this.c);await bounded(client.connect());const me=await bounded(client.getMe());check(!me.bot&&sid(me.id)===sid(this.c.expectedUserId)&&me.username?.toLowerCase()===this.c.expectedUsername.toLowerCase(),'SENDER_IDENTITY');return await fn(client);}finally{if(client)await bounded(client.destroy(),10000).catch(()=>{});}}
  targets(){return(this.store.read('topics')?.targets||[]).filter(t=>this.scope.groups.some(g=>g.id===t.groupId));}
@@ -67,30 +68,36 @@ class Service{
  draft(owner){const d=this.store.read('draft_'+owner);return d&&d.expiresAt>Date.now()?d:null;}
  save(d){d.rev=crypto.randomBytes(4).toString('hex');d.expiresAt=Date.now()+86400000;this.store.change('draft_'+d.owner,()=>d);return d;}
  button(d,text,action){return {text,callback_data:'ps:'+d.owner+':'+d.rev+':'+action};}
- async tell(owner,text,buttons){return this.bot('sendMessage',{chat_id:owner,text,...(buttons?{reply_markup:{inline_keyboard:buttons.map(row=>row)}}:{})});}
- async screen(d,text,rows){if(this.replyContext&&/^(content|input_)/.test(d.stage))text+='\n\n↩️ இந்த bot message-க்கு Reply செய்து பதிலை அனுப்புங்கள்.';d.keys=Object.fromEntries((rows||[]).flat().map(([label,action])=>[label,action]));d=this.save(d);return this.bot('sendMessage',{chat_id:d.owner,text,reply_markup:{keyboard:[...(rows||[]).map(row=>row.map(([label])=>({text:label}))),[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false,input_field_placeholder:'Button தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}});}
+ // locked NNA rich look (19 Oct 2026): html is sent with the same reply_markup; only an explicit Telegram refusal of
+ // the rich message falls back to the plain text (a transport error is never retried, it could duplicate the message)
+ async rich(html,body){
+  if(html)try{const {text,entities,link_preview_options,...rest}=body;return await this.bot('sendRichMessage',{...rest,rich_message:{html}});}catch(e){if(!(e.telegramStatus>=400&&e.telegramStatus<500))throw e;}
+  return this.bot('sendMessage',body);
+ }
+ async tell(owner,text,buttons,html){return this.rich(html,{chat_id:owner,text,...(buttons?{reply_markup:{inline_keyboard:buttons.map(row=>row)}}:{})});}
+ async screen(d,text,rows,html){if(this.replyContext&&/^(content|input_)/.test(d.stage)){text+='\n\n↩️ இந்த bot message-க்கு Reply செய்து பதிலை அனுப்புங்கள்.';if(html)html+=PP.replyHint();}d.keys=Object.fromEntries((rows||[]).flat().map(([label,action])=>[label,action]));d=this.save(d);return this.rich(html,{chat_id:d.owner,text,reply_markup:{keyboard:[...(rows||[]).map(row=>row.map(([label])=>({text:label}))),[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false,input_field_placeholder:'Button தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}});}
  async home(owner){
   if(this.replyContext){
    const d=this.draft(owner);if(d){d.active=false;d.keys={};this.save(d);}
-   return this.bot('sendMessage',{chat_id:owner,text:'#NNA — இந்த topic-ல் பயன்படுத்தலாம்\n\nImage / Video Report, Poll / Quiz / Checklist.\nHistory, template நிர்வாகம், media publishing மற்றும் scheduling தனிப்பட்ட chat-ல் தொடரும்.',reply_markup:{keyboard:[[{text:'🔎 Image / Video Report'}],[{text:'🗳️ Poll / Quiz / Checklist'}],[{text:'📚 Poll Templates'}],[{text:'↗️ தனிப்பட்ட menu',url:'https://t.me/'+this.scope.botUsername+'?start=menu'}]]}});
+   return this.rich(PP.groupHome(),{chat_id:owner,text:'#NNA — இந்த topic-ல் பயன்படுத்தலாம்\n\nImage / Video Report, Poll / Quiz / Checklist.\nHistory, template நிர்வாகம், media publishing மற்றும் scheduling தனிப்பட்ட chat-ல் தொடரும்.',reply_markup:{keyboard:[[{text:'🔎 Image / Video Report'}],[{text:'🗳️ Poll / Quiz / Checklist'}],[{text:'📚 Poll Templates'}],[{text:'↗️ தனிப்பட்ட menu',url:'https://t.me/'+this.scope.botUsername+'?start=menu'}]]}});
   }
-  const d=this.draft(owner);if(d){d.active=false;d.keys={};this.save(d);}return this.bot('sendMessage',{chat_id:owner,text:'#NNA — முக்கிய menu\nகீழே உள்ள buttons மூலம் தேர்வு செய்யுங்கள்.',reply_markup:{keyboard:homeRows.map(row=>row.map(text=>({text}))),resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});}
+  const d=this.draft(owner);if(d){d.active=false;d.keys={};this.save(d);}return this.rich(PP.home(),{chat_id:owner,text:'#NNA — முக்கிய menu\nகீழே உள்ள buttons மூலம் தேர்வு செய்யுங்கள்.',reply_markup:{keyboard:homeRows.map(row=>row.map(text=>({text}))),resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});}
  async groupMenu(a){
   const member=await this.bot('getChatMember',{chat_id:a.groupId,user_id:Number(a.owner)});if(!['creator','administrator'].includes(member.status))return {status:'admin_required'};
   const text=a.text.replace(new RegExp('@'+this.scope.botUsername+'\\b','ig'),'').trim(),command=homeCommands[a.text]||text;
-  return this.bot('sendMessage',{chat_id:a.groupId,...(a.topicId?{message_thread_id:a.topicId}:{}),reply_parameters:{message_id:a.message.message_id},text:'இந்த வசதியை @'+this.scope.botUsername+' private chat-ல் திறக்க கீழே அழுத்துங்கள்.',reply_markup:{inline_keyboard:[[{text:'↗️ '+command,url:'https://t.me/'+this.scope.botUsername+'?start='+command.slice(1)}]]}});
+  return this.rich(PP.openPrivate(this.scope.botUsername,command),{chat_id:a.groupId,...(a.topicId?{message_thread_id:a.topicId}:{}),reply_parameters:{message_id:a.message.message_id},text:'இந்த வசதியை @'+this.scope.botUsername+' private chat-ல் திறக்க கீழே அழுத்துங்கள்.',reply_markup:{inline_keyboard:[[{text:'↗️ '+command,url:'https://t.me/'+this.scope.botUsername+'?start='+command.slice(1)}]]}});
  }
 
  async start(owner,kind){
   const d={owner,active:true,stage:'type',settings:model.defaults(),sourceText:'',sourceEntities:[],poll:null};
   if(kind){d.settings.type=kind===true?'quiz':kind;return this.input(d);}
-  return this.screen(d,'🗳️ Poll / Quiz / Checklist\n\nஎதை உருவாக்கப் போகிறீர்கள்?',[[['🗳️ Vote Poll','type_poll'],['❓ Quiz — சரியான விடையுடன்','type_quiz']],[['☑️ Checklist','type_checklist']],[['📚 Templates','templates'],['📍 Topics','topics']],[['❌ ரத்து','cancel']]]);
+  return this.screen(d,'🗳️ Poll / Quiz / Checklist\n\nஎதை உருவாக்கப் போகிறீர்கள்?',[[['🗳️ Vote Poll','type_poll'],['❓ Quiz — சரியான விடையுடன்','type_quiz']],[['☑️ Checklist','type_checklist']],[['📚 Templates','templates'],['📍 Topics','topics']],[['❌ ரத்து','cancel']]],PP.start());
  }
- async input(d){d.stage='content';d.active=true;if(d.settings.type==='checklist')return this.screen(d,'☑️ Checklist — ஒரே message-ல் அனுப்புங்கள்:\n\nஇன்றைய பணிகள்\n1. முதல் பணி\n2. இரண்டாவது பணி\n\nதலைப்பு: 255 characters. 1–30 items; ஒவ்வொன்றும் 100 characters வரை.',[[['❌ ரத்து','cancel']]]);return this.screen(d,(d.settings.type==='quiz'?'❓ Quiz':'🗳️ Poll')+' — கேள்வி மற்றும் options\n\nஒரே message-ல் இப்படி அனுப்புங்கள்:\n\nஉங்கள் கேள்வி?\nA) முதல் விடை\nB) இரண்டாவது விடை\nC) மூன்றாவது விடை\n\n2–12 options. கேள்வி 300 characters; ஒவ்வொரு option 100 characters.\n'+(d.settings.type==='quiz'?'அடுத்ததாக சரியான விடையைக் கேட்பேன்.':'அடுத்து settings மற்றும் preview வரும்.'),[[['❌ ரத்து','cancel']]]);}
- async ask(d,field,text){d.stage='input_'+field;return this.screen(d,text,[[['↩️ Settings','settings'],['❌ ரத்து','cancel']]]);}
+ async input(d){d.stage='content';d.active=true;if(d.settings.type==='checklist')return this.screen(d,'☑️ Checklist — ஒரே message-ல் அனுப்புங்கள்:\n\nஇன்றைய பணிகள்\n1. முதல் பணி\n2. இரண்டாவது பணி\n\nதலைப்பு: 255 characters. 1–30 items; ஒவ்வொன்றும் 100 characters வரை.',[[['❌ ரத்து','cancel']]],PP.input('checklist'));return this.screen(d,(d.settings.type==='quiz'?'❓ Quiz':'🗳️ Poll')+' — கேள்வி மற்றும் options\n\nஒரே message-ல் இப்படி அனுப்புங்கள்:\n\nஉங்கள் கேள்வி?\nA) முதல் விடை\nB) இரண்டாவது விடை\nC) மூன்றாவது விடை\n\n2–12 options. கேள்வி 300 characters; ஒவ்வொரு option 100 characters.\n'+(d.settings.type==='quiz'?'அடுத்ததாக சரியான விடையைக் கேட்பேன்.':'அடுத்து settings மற்றும் preview வரும்.'),[[['❌ ரத்து','cancel']]],PP.input(d.settings.type));}
+ async ask(d,field,text){d.stage='input_'+field;return this.screen(d,text,[[['↩️ Settings','settings'],['❌ ரத்து','cancel']]],PP.ask(field));}
  async preview(d){
   d.stage='settings';d.active=true;const s=d.settings,on=x=>x?'ON':'OFF';
-  if(s.type==='checklist')return this.screen(d,'☑️ CHECKLIST — Preview\n\n'+d.poll.question.text+'\n\n'+d.poll.answers.map((a,i)=>(i+1)+'. ☐ '+a.text).join('\n')+'\n\n➕ மற்றவர்கள் items சேர்க்கலாம்: '+on(s.othersAppend)+'\n✅ மற்றவர்கள் complete / undo செய்யலாம்: '+on(s.othersComplete)+'\n👤 @'+this.c.expectedUsername,[[['➕ Add items '+on(s.othersAppend),'toggle_othersAppend']],[['✅ Complete / Undo '+on(s.othersComplete),'toggle_othersComplete']],[['✏️ பட்டியல் மாற்று','edit'],['💾 Template சேமி','save']],[['✅ Topic தேர்வு','destinations'],['📚 Templates','templates']],[['❌ ரத்து','cancel']]]);
+  if(s.type==='checklist')return this.screen(d,'☑️ CHECKLIST — Preview\n\n'+d.poll.question.text+'\n\n'+d.poll.answers.map((a,i)=>(i+1)+'. ☐ '+a.text).join('\n')+'\n\n➕ மற்றவர்கள் items சேர்க்கலாம்: '+on(s.othersAppend)+'\n✅ மற்றவர்கள் complete / undo செய்யலாம்: '+on(s.othersComplete)+'\n👤 @'+this.c.expectedUsername,[[['➕ Add items '+on(s.othersAppend),'toggle_othersAppend']],[['✅ Complete / Undo '+on(s.othersComplete),'toggle_othersComplete']],[['✏️ பட்டியல் மாற்று','edit'],['💾 Template சேமி','save']],[['✅ Topic தேர்வு','destinations'],['📚 Templates','templates']],[['❌ ரத்து','cancel']]],PP.preview(d,this.c.expectedUsername));
   const body=(s.type==='quiz'?'❓ QUIZ':'🗳️ POLL')+' — Preview\n\n'+d.poll.question.text+'\n\n'+d.poll.answers.map((a,i)=>String.fromCharCode(65+i)+') '+a.text).join('\n')+'\n\n'+
    (s.type==='quiz'?'✅ சரியான விடை: '+s.correct.map(i=>String.fromCharCode(65+i)).join(', ')+'\n':'')+
    '👤 '+(s.anonymous?'Anonymous':'வாக்களிப்பவரின் பெயர் தெரியும்')+'\n☑️ பல விடைகள்: '+on(s.multiple)+'\n🔁 Vote மாற்றலாம்: '+on(s.revote)+'\n🔀 Shuffle: '+on(s.shuffle)+'\n➕ புதிய options சேர்க்கலாம்: '+on(s.adding)+'\n⏱ Timer: '+(s.seconds?s.seconds+' seconds':'OFF')+'\n🙈 முடியும் வரை results மறை: '+on(s.hide)+'\n👥 24 மணி நேர group members மட்டும்: '+on(s.members)+'\n🌍 Countries: '+(s.countries.join(', ')||'அனைத்தும்')+
@@ -106,14 +113,14 @@ class Service{
    [['💾 Template சேமி','save'],['✅ Topic தேர்வு','destinations']],
    [['📚 Templates','templates'],['❌ ரத்து','cancel']]
   ];
-  return this.screen(d,body,rows);
+  return this.screen(d,body,rows,PP.preview(d,this.c.expectedUsername));
  }
  async list(owner,page=0){
   const items=Object.entries(this.templates()).sort(([a],[b])=>a.localeCompare(b)),d=this.draft(owner)||{owner,active:false,settings:model.defaults()};
   const rows=items.slice(page*12,page*12+12).map(([code,t])=>[[code+' · '+t.poll.question.text.slice(0,45),'load_'+code]]);
   if(page>0)rows.push([['⬅️ முந்தையவை','list_'+(page-1)]]);if(items.length>(page+1)*12)rows.push([['அடுத்து ➡️','list_'+(page+1)]]);
   rows.push([['🆕 புதிய Poll / Quiz','new'],['📍 Topics','topics']]);
-  return this.screen(d,'📚 Poll / Quiz / Checklist Templates\n\n'+(items.length?'Code word-ஐ private chat-ல் அனுப்பினால் preview வரும்.\nEnabled group topic-ல் அதே code word மட்டும் அனுப்பினால் புதிய Poll / Quiz / Checklist உடனே @'+this.c.expectedUsername+' மூலம் வெளியாகும்.':'இன்னும் template இல்லை. /poll மூலம் உருவாக்கி 💾 Template சேமி அழுத்துங்கள்.'),rows);
+  return this.screen(d,'📚 Poll / Quiz / Checklist Templates\n\n'+(items.length?'Code word-ஐ private chat-ல் அனுப்பினால் preview வரும்.\nEnabled group topic-ல் அதே code word மட்டும் அனுப்பினால் புதிய Poll / Quiz / Checklist உடனே @'+this.c.expectedUsername+' மூலம் வெளியாகும்.':'இன்னும் template இல்லை. /poll மூலம் உருவாக்கி 💾 Template சேமி அழுத்துங்கள்.'),rows,PP.list(items,this.c.expectedUsername));
  }
  async load(owner,code){
   const t=this.templates()[code.toLowerCase()];check(t,'TEMPLATE_MISSING');
@@ -126,37 +133,37 @@ class Service{
   });
  }
  async topicGroups(owner){
-  if(this.replyContext)return this.tell(owner,'Topic நிர்வாகத்தை தனிப்பட்ட chat-ல் திறக்கவும்.',[[{text:'↗️ Poll topics',url:'https://t.me/'+this.scope.botUsername+'?start=polltopics'}]]);
+  if(this.replyContext)return this.tell(owner,'Topic நிர்வாகத்தை தனிப்பட்ட chat-ல் திறக்கவும்.',[[{text:'↗️ Poll topics',url:'https://t.me/'+this.scope.botUsername+'?start=polltopics'}]],PP.privateTopics());
   const d=this.draft(owner)||{owner,active:false,settings:model.defaults()};
-  return this.screen(d,'📍 Poll பயன்படுத்தும் topics\n\nGroup-ஐத் தேர்வு செய்து topics-ஐ ON/OFF செய்யுங்கள். புதிய topic உருவாக்கினால் இங்கே தோன்றும்; extension update தேவையில்லை.',this.scope.groups.map((g,i)=>[[g.title,'tg_'+i+'_0']]).concat([[['↩️ Poll Templates','templates']]]));
+  return this.screen(d,'📍 Poll பயன்படுத்தும் topics\n\nGroup-ஐத் தேர்வு செய்து topics-ஐ ON/OFF செய்யுங்கள். புதிய topic உருவாக்கினால் இங்கே தோன்றும்; extension update தேவையில்லை.',this.scope.groups.map((g,i)=>[[g.title,'tg_'+i+'_0']]).concat([[['↩️ Poll Templates','templates']]]),PP.topicGroups(this.scope.groups.length));
  }
  async topicPage(owner,gi,page=0){
   if(this.replyContext)return this.topicGroups(owner);
   const g=this.scope.groups[gi];check(g,'GROUPS');const list=await this.topics(g.id),enabled=this.targets(),d=this.draft(owner)||{owner,active:false,settings:model.defaults()};
   const rows=list.slice(page*12,page*12+12).map(t=>[[(enabled.some(e=>e.groupId===g.id&&e.topicId===t.topicId)?'✅ ':'▫️ ')+t.title,'en_'+gi+'_'+t.topicId+'_'+page]]);
   if(page>0)rows.push([['⬅️','tg_'+gi+'_'+(page-1)]]);if(list.length>(page+1)*12)rows.push([['➡️','tg_'+gi+'_'+(page+1)]]);
-  rows.push([['↩️ Groups','topics'],['📚 Templates','templates']]);return this.screen(d,g.title+'\nTopic-ஐத் தொட்டு enable / disable செய்யுங்கள்.',rows);
+  rows.push([['↩️ Groups','topics'],['📚 Templates','templates']]);return this.screen(d,g.title+'\nTopic-ஐத் தொட்டு enable / disable செய்யுங்கள்.',rows,PP.topicPage(g.title,list.filter(t=>enabled.some(e=>e.groupId===g.id&&e.topicId===t.topicId)).length,list.length));
  }
  async destinations(d){
   model.validate(d);const targets=this.targets().filter(t=>!this.replyContext||t.groupId===this.replyContext.chatId&&t.topicId===(this.replyContext.topicId||1));check(targets.length,'NO_TOPICS');d.stage='destination';d.destinations=targets;
-  return this.screen(d,'📍 எந்த topic-ல் வெளியிட வேண்டும்?',targets.map((t,i)=>[[this.scope.groups.find(g=>g.id===t.groupId)?.title+' · '+(t.title||t.topicId),'dst_'+i]]).concat([[['↩️ Settings','settings'],['📍 Topics நிர்வகி','topics']]]));
+  return this.screen(d,'📍 எந்த topic-ல் வெளியிட வேண்டும்?',targets.map((t,i)=>[[this.scope.groups.find(g=>g.id===t.groupId)?.title+' · '+(t.title||t.topicId),'dst_'+i]]).concat([[['↩️ Settings','settings'],['📍 Topics நிர்வகி','topics']]]),PP.destinations(targets.length));
  }
  async confirm(d,index){
   const t=d.destinations?.[index];check(t&&this.targets().some(x=>x.groupId===t.groupId&&x.topicId===t.topicId),'TOPIC_DISABLED');d.target=t;d.stage='confirm';
-  return this.screen(d,'✅ வெளியிடுவதற்கான இறுதி உறுதி\n\n'+d.poll.question.text+'\n📍 '+t.title+'\n👤 @'+this.c.expectedUsername+(d.settings.type==='checklist'?'\n☑️ Checklist':'\n🔁 Vote மாற்றலாம்: '+(d.settings.revote?'ON':'OFF'))+'\n'+(d.settings.type==='quiz'?'❓ Quiz — சரியான விடை '+d.settings.correct.map(i=>String.fromCharCode(65+i)).join(', '):d.settings.type==='checklist'?'☑️ Checklist':'🗳️ Poll'),[[['✅ வெளியிடு','publish'],['↩️ Settings','settings']],[['💾 Template சேமி','save'],['❌ ரத்து','cancel']]]);
+  return this.screen(d,'✅ வெளியிடுவதற்கான இறுதி உறுதி\n\n'+d.poll.question.text+'\n📍 '+t.title+'\n👤 @'+this.c.expectedUsername+(d.settings.type==='checklist'?'\n☑️ Checklist':'\n🔁 Vote மாற்றலாம்: '+(d.settings.revote?'ON':'OFF'))+'\n'+(d.settings.type==='quiz'?'❓ Quiz — சரியான விடை '+d.settings.correct.map(i=>String.fromCharCode(65+i)).join(', '):d.settings.type==='checklist'?'☑️ Checklist':'🗳️ Poll'),[[['✅ வெளியிடு','publish'],['↩️ Settings','settings']],[['💾 Template சேமி','save'],['❌ ரத்து','cancel']]],PP.confirm(d,t.title||String(t.topicId),this.c.expectedUsername));
  }
  async deliver(owner,d,target,key){
   check(this.targets().some(x=>x.groupId===target.groupId&&x.topicId===target.topicId)&&(!this.replyContext||target.groupId===this.replyContext.chatId&&target.topicId===(this.replyContext.topicId||1)),'TOPIC_DISABLED');model.validate(d);
   let taken=false;this.store.change('send_'+key,old=>{if(old)return old;taken=true;return {status:'sending',owner,target,createdAt:Date.now()};});
   if(!taken)return {status:'duplicate'};
-  try{const receipt=await this.personal(client=>(this.deps.publish||model.publish)(client,this.c,d,target,key,bounded));this.store.change('send_'+key,x=>({...x,...receipt,finishedAt:Date.now()}));if(d.settings.type!=='poll'||this.scope.pollPublishConfirmation!==false)await this.tell(owner,'✅ '+(d.settings.type==='quiz'?'Quiz':d.settings.type==='checklist'?'Checklist':'Poll')+' வெளியிடப்பட்டது.\n👤 @'+this.c.expectedUsername+'\n📍 '+receipt.url);return receipt;}
+  try{const receipt=await this.personal(client=>(this.deps.publish||model.publish)(client,this.c,d,target,key,bounded));this.store.change('send_'+key,x=>({...x,...receipt,finishedAt:Date.now()}));if(d.settings.type!=='poll'||this.scope.pollPublishConfirmation!==false)await this.tell(owner,'✅ '+(d.settings.type==='quiz'?'Quiz':d.settings.type==='checklist'?'Checklist':'Poll')+' வெளியிடப்பட்டது.\n👤 @'+this.c.expectedUsername+'\n📍 '+receipt.url,undefined,PP.published(d.settings.type,this.c.expectedUsername,receipt.url));return receipt;}
   catch(e){this.store.change('send_'+key,x=>({...x,status:'uncertain',error:/^POLL_[A-Z_]+$/.test(e.message)?e.message:'POLL_DELIVERY_UNCONFIRMED'}));throw e;}
  }
  async saveTemplate(d,code){
   code=String(code).trim().toLowerCase();check(/^[a-z][a-z0-9_]{2,31}$/.test(code),'CODE');model.validate(d);
   const template={sourceText:d.sourceText,sourceEntities:d.sourceEntities,poll:d.poll,settings:d.settings,savedBy:d.owner,savedAt:Date.now()};
   this.store.change('templates',old=>{const items={...(old?.items||{})};check(items[code]||Object.keys(items).length<200,'TEMPLATE_LIMIT');items[code]=clone(template);return {items};});
-  await this.tell(d.owner,'💾 Template சேமிக்கப்பட்டது: '+code+'\n\nPrivate: '+code+' → Preview\nEnabled group topic: '+code+' → @'+this.c.expectedUsername+' மூலம் புதிய Poll / Quiz / Checklist.\nஒவ்வொரு முறையும் புதிய பதிவு உருவாகும்.');return this.preview(d);
+  await this.tell(d.owner,'💾 Template சேமிக்கப்பட்டது: '+code+'\n\nPrivate: '+code+' → Preview\nEnabled group topic: '+code+' → @'+this.c.expectedUsername+' மூலம் புதிய Poll / Quiz / Checklist.\nஒவ்வொரு முறையும் புதிய பதிவு உருவாகும்.',undefined,PP.saved(code,this.c.expectedUsername));return this.preview(d);
  }
  async configureCommands(){
   const scope={type:'all_private_chats'},scoped=await this.bot('getMyCommands',{scope}),base=scoped.length?scoped:await this.bot('getMyCommands');
@@ -180,7 +187,7 @@ class Service{
   if(cb){
    if(cb.data==='tpl:'+a.owner+':poll:')return this.start(a.owner,false);
    const m=/^ps:(\d+):([a-f0-9]{8}):([a-zA-Z0-9_]+)$/.exec(cb.data||'');check(m&&m[1]===a.owner&&d&&m[2]===d.rev,'STALE');const act=m[3];
-   if(act==='cancel'){d.active=false;d.stage='cancelled';this.save(d);return this.tell(a.owner,'❌ Poll draft ரத்து செய்யப்பட்டது. /poll மூலம் மீண்டும் தொடங்கலாம்.');}
+   if(act==='cancel'){d.active=false;d.stage='cancelled';this.save(d);return this.tell(a.owner,'❌ Poll draft ரத்து செய்யப்பட்டது. /poll மூலம் மீண்டும் தொடங்கலாம்.',undefined,PP.cancelled(true));}
    if(act==='new')return this.start(a.owner,false);
    if(act==='templates')return this.list(a.owner);
    if(act.startsWith('list_'))return this.list(a.owner,Number(act.slice(5)));
@@ -206,9 +213,9 @@ class Service{
    throw Error('POLL_STALE');
   }
   check(d?.active,'NO_DRAFT');
-  if(text==='/cancel'){d.active=false;d.stage='cancelled';this.save(d);return this.tell(a.owner,'❌ Poll draft ரத்து செய்யப்பட்டது.');}
+  if(text==='/cancel'){d.active=false;d.stage='cancelled';this.save(d);return this.tell(a.owner,'❌ Poll draft ரத்து செய்யப்பட்டது.',undefined,PP.cancelled(false));}
   if(d.stage==='content'){
-   try{d.poll=(d.settings.type==='checklist'?require('./checklist').parse:parsePollText)(a.message.text,a.message.entities||[]);}catch(e){return this.tell(a.owner,'⚠️ '+e.message+'\nகேள்வி, அடுத்து A) / B) options உள்ள ஒரே message அனுப்புங்கள்.');}
+   try{d.poll=(d.settings.type==='checklist'?require('./checklist').parse:parsePollText)(a.message.text,a.message.entities||[]);}catch(e){return this.tell(a.owner,'⚠️ '+e.message+'\nகேள்வி, அடுத்து A) / B) options உள்ள ஒரே message அனுப்புங்கள்.',undefined,PP.parseError(e.message));}
    d.sourceText=a.message.text;d.sourceEntities=a.message.entities||[];d.settings.correct=[];
    if(d.settings.type==='quiz')return this.ask(d,'correct','✅ சரியான விடை எது?\nA அல்லது 1 அனுப்புங்கள். பல சரியான விடைகள்: A,C');
    return this.preview(d);
@@ -265,7 +272,8 @@ class Service{
   }catch(e){
    const code=/^POLL_[A-Z_]+$/.test(e.message)?e.message:'POLL_OPERATION_FAILED';
    if(claimed)this.store.change('event_'+u.update_id,x=>({...x,status:'failed',code}));
-   await this.tell(a.owner,'⚠️ '+(errorText[code]||'இந்த poll செயலை முடிக்க முடியவில்லை ('+code+'). /poll மூலம் புதிய draft தொடங்கலாம்.')).catch(()=>{});
+   const reason=errorText[code]||'இந்த poll செயலை முடிக்க முடியவில்லை ('+code+'). /poll மூலம் புதிய draft தொடங்கலாம்.';
+   await this.tell(a.owner,'⚠️ '+reason,undefined,PP.failed(reason)).catch(()=>{});
    return {handled:true,status:'failed',code};
   }finally{this.store.change('lease_'+a.owner,x=>x?.token===lease?{token:'',until:0}:x);}
  }

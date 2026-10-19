@@ -1,4 +1,5 @@
 'use strict';
+const {shown:seen,isMessage}=require('./rich-shown');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {Api}=require('teleproto'),bigInt=require('big-integer');
 const {Service,authenticate,parseMedia,keyboard}=require('../dist/nodes/NnaMediaCollection/core');
@@ -23,7 +24,7 @@ test('ordinary media only offers topics, preserves caption, never invokes analys
  const s=setup(t);s.analyze=()=>{throw Error('MUST_NOT_ANALYZE');};
  const r=await s.handle(incoming(1,{...asset,caption:'🙏 Text',caption_entities:[{type:'bold',offset:3,length:4}]}));
  const d=s.store.read(r.json.jobKey);assert.equal(d.analysisApproved,false);assert.equal(d.analysisConsent,null);assert.equal(d.caption,'🙏 Text');
- const msg=s.calls.find(x=>x.method==='sendMessage').body;assert.equal(msg.text,'📍 எந்த topic-ல் பதிவிட வேண்டும்?');assert(!JSON.stringify(msg.reply_markup).includes('analy'));
+ const msg=s.calls.find(isMessage).body;assert(seen(msg).includes('எந்த topic-ல் பதிவிட வேண்டும்?'));assert(!JSON.stringify(msg.reply_markup).includes('analy'));
  assert.equal((await s.handle(incoming(1,asset))).json.status,'duplicate');
 });
 test('all topics retain order and one emoji in rows of four buttons',()=>{
@@ -97,7 +98,7 @@ test('successful analysis only updates this draft and requires a later topic tap
  const d=s.store.read(r.json.jobKey),candidates=['Jesus','Christianity','Faith','Prayer','Peace','Love','Bible','Compassion','Forgiveness','Devotion','Spirituality','Hope','SermonOnTheMount'].map(tag=>({tag,confidence:.9,evidence:'Synthetic supported example'}));
  const result=await s.finish(d.key,d.rev,{candidates:[{content:{parts:[{text:JSON.stringify({candidates,summaryLines:summary})}]}}]});
  assert.equal(result.status,'analysis_ready');const next=s.store.read(d.key);assert.equal(next.status,'pending');assert(next.tags.includes('#Gods'));assert(next.tags.includes('#Deities'));assert.equal(next.receipt,undefined);
- assert.deepEqual(next.summaryLines,summary);assert(s.calls.at(-1).body.text.includes(summary.join('\n')+'\n\n#'));assert(s.reusedTags().includes('#Jesus'));
+ assert.deepEqual(next.summaryLines,summary);for(const line of summary)assert(seen(s.calls.at(-1).body).includes(line));assert(seen(s.calls.at(-1).body).includes('#Jesus'));assert(s.reusedTags().includes('#Jesus'));
  assert(s.calls.at(-1).body.reply_markup.inline_keyboard.some(row=>row[0].text.includes('Hashtags நீக்கு')));
 });
 test('completed summary and hashtags stay private while group caption remains original',async t=>{
@@ -115,7 +116,7 @@ test('reply analysis of a posted upload gives one combined reply without modifyi
  assert.equal((await s.handle(command)).json.status,'duplicate_analysis');
  assert.equal((await s.finish(selected.key,selected.rev,analysisResult())).status,'analysis_ready');
  const result=s.calls.at(-1).body,shown=require('../dist/nodes/NnaMediaCollection/rich-format').plain(result.rich_message.html);for(const line of summary)assert(shown.includes(line));assert(shown.includes('#Jesus'));if(result.reply_markup)assert.deepEqual(result.reply_markup.inline_keyboard,[]);
- const progress=s.calls.find(x=>x.method==='sendMessage'&&x.body.text.includes('தயாராகின்றன'));assert.equal(progress.body.reply_to_message_id,1);
+ const progress=s.calls.find(x=>isMessage(x)&&seen(x.body).includes('தயாராகின்றன'));assert.equal(progress.body.reply_parameters.message_id,1);
  assert.deepEqual(s.store.read(original.key),saved);assert.equal(s.store.read(selected.key).status,'analysed');
  await assert.rejects(s.publish(selected,10),/MUST_NOT_POST/);
 });

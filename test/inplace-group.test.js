@@ -1,4 +1,5 @@
 'use strict';
+const {shown,isMessage}=require('./rich-shown');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {Service:Media}=require('../dist/nodes/NnaMediaCollection/core'),{Service:Poll}=require('../dist/nodes/NnaPollStudio/service'),{Store}=require('../dist/nodes/NnaMediaCollection/store');
 const {Api}=require('teleproto'),bigInt=require('big-integer');
@@ -63,7 +64,7 @@ test('group source download verifies topic and uses no private copy/staging',asy
  assert.equal((await s.analyze(d)).json.next,1);topic=11;await assert.rejects(s.analyze(d),/TOPIC_MISMATCH/);assert.equal(downloads,1);assert(!calls.some(c=>c.method==='copyMessage'));
 });
 test('media group menu is analysis-only and topic order retains private launcher',async t=>{
- const {s,calls}=setup(t);await s.handle(incoming(1,'/menu'));assert.match(sends(calls).at(-1).body.text,/Group Image/);await s.handle(incoming(2,'/topicorder'));assert.match(sends(calls).at(-1).body.reply_markup.inline_keyboard[0][0].url,/start=topicorder/);
+ const {s,calls}=setup(t);await s.handle(incoming(1,'/menu'));assert.match(shown(sends(calls).at(-1).body),/Group Image/i);assert.match(sends(calls).at(-1).body.reply_markup.inline_keyboard[0][0].url,/start=menu/);await s.handle(incoming(2,'/topicorder'));assert.match(sends(calls).at(-1).body.reply_markup.inline_keyboard[0][0].url,/start=topicorder/);
 });
 test('reply group home report button starts only the requested bot report',async t=>{
  const p=setup(t,'poll'),m=setup(t,'reply');await p.s.handle(incoming(1,'/menu'));const b=sends(p.calls).at(-1).body.reply_markup.inline_keyboard.flat().find(x=>x.text.includes('Report'));
@@ -72,7 +73,7 @@ test('reply group home report button starts only the requested bot report',async
 for(const kind of ['quiz','checklist'])test('group '+kind+' wizard uses actor-bound inline controls, same-topic destination and private management',async t=>{
  const {s,calls}=setup(t,'poll');await s.handle(incoming(1,'/poll'));const body=sends(calls).at(-1).body;assert(!body.reply_markup.keyboard);const btn=body.reply_markup.inline_keyboard.flat().find(x=>x.text.includes(kind==='quiz'?'Quiz':'Checklist'));
  const prompt={message_id:501};assert.equal((await s.handle(callback(2,prompt,btn,43))).status,'stale_group_button');assert.equal((await s.handle(callback(3,prompt,btn,42,11))).status,'stale_group_button');
- assert.equal((await s.handle(callback(4,prompt,btn))).status,'handled');assert.equal(s.draft('42').stage,'content');assert.match(sends(calls).at(-1).body.text,/Reply/);
+ assert.equal((await s.handle(callback(4,prompt,btn))).status,'handled');assert.equal(s.draft('42').stage,'content');assert.match(shown(sends(calls).at(-1).body),/Reply/);
  const reply={reply_to_message:{message_id:502,from:{id:99,is_bot:true}}},content=kind==='quiz'?'Question?\nA) Yes\nB) No':'Tasks\n1. Read\n2. Write';
  const sentBefore=sends(calls).length;await s.handle(incoming(5,content));assert.equal(sends(calls).length,sentBefore);
  await s.handle(incoming(6,content,reply));if(kind==='quiz')await s.handle(incoming(7,'B',reply));assert.equal(s.draft('42').stage,'settings');assert.equal(s.draft('42').settings.revote,false);

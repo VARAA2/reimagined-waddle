@@ -10,7 +10,7 @@ const {selectHashtags,composeCaption,summaryLines,composeAnalysisCaption,compose
 const bank=require('./hashtag-bank.json');
 const prompt=require('./prompt.json');
 const feedback=require('./processing-feedback');
-const RF=require('./rich-format'),RR=require('./rich-reports');
+const RF=require('./rich-format'),RR=require('./rich-reports'),RN=require('./rich-notices');
 const check=(ok,code)=>{if(!ok)throw Error('MEDIA_'+code);};
 const sid=x=>String(x??'');
 const positive=x=>Number.isSafeInteger(x)&&x>0;
@@ -70,7 +70,7 @@ class Service{
  constructor(ctx,c,b,scope,deps={}){this.ctx=ctx;this.c=c;this.b=b;this.scope=config(c,scope);this.deps=deps;}
  async bot(method,body={},timeout=25000){
   check(typeof this.b.accessToken==='string'&&/^\d+:[A-Za-z0-9_-]+$/.test(this.b.accessToken),'TOKEN');
-  try{const r=await this.ctx.helpers.httpRequest({method:'POST',url:'https://api.telegram.org/bot'+this.b.accessToken+'/'+method,body,json:true,timeout});check(r?.ok,'BOT_RESPONSE');return r.result;}catch(cause){const e=Error('MEDIA_BOT_'+method.toUpperCase()+'_FAILED');const status=cause.statusCode||cause.response?.status||cause.response?.statusCode;const description=JSON.stringify(cause.response?.body||cause.response?.data||cause.description||cause.message||'');if(status===400&&/CUSTOM_EMOJI|custom emoji|icon_custom_emoji/i.test(description))e.customEmojiRejected=true;if(status===400&&/REACTION_INVALID|REACTIONS_TOO_MANY|REACTION_EMPTY/i.test(description))e.reactionRejected=true;throw e;}
+  try{const r=await this.ctx.helpers.httpRequest({method:'POST',url:'https://api.telegram.org/bot'+this.b.accessToken+'/'+method,body,json:true,timeout});check(r?.ok,'BOT_RESPONSE');return r.result;}catch(cause){const e=Error('MEDIA_BOT_'+method.toUpperCase()+'_FAILED');const status=cause.statusCode||cause.response?.status||cause.response?.statusCode;const description=JSON.stringify(cause.response?.body||cause.response?.data||cause.description||cause.message||'');if(Number.isInteger(status))e.telegramStatus=status;if(status===400&&/CUSTOM_EMOJI|custom emoji|icon_custom_emoji/i.test(description))e.customEmojiRejected=true;if(status===400&&/REACTION_INVALID|REACTIONS_TOO_MANY|REACTION_EMPTY/i.test(description))e.reactionRejected=true;throw e;}
  }
  async init(){
   check(process.env.EXECUTIONS_MODE!=='queue','SINGLE_INSTANCE_REQUIRED');
@@ -107,6 +107,8 @@ class Service{
   const found=await this.bot('getMyCommands',{scope:{type:'all_private_chats'}});check(JSON.stringify(found)===JSON.stringify(commands),'COMMANDS_UNCONFIRMED');return {status:'commands_configured',commands};
  }
  async tell(owner,text,extra={}){return this.bot('sendMessage',{chat_id:owner,text,...extra});}
+ // locked NNA rich look (19 Oct 2026); the old plain text goes out if Telegram refuses the rich message
+ async say(owner,html,text,extra={}){return RF.send(this,owner,html,{extra:RF.richExtra(extra),fallback:text,fallbackExtra:extra});}
  async refreshTopicButtons(key){
   const d=this.store.read(key);check(d&&d.status==='pending'&&this.scope.operatorIds.includes(d.owner)&&positive(d.controlId),'PENDING_DRAFT_REQUIRED');
   await this.display(d);return {status:'topics_refreshed',jobKey:key,columns:this.scope.fullTopicKeyboard?3:this.scope.replyKeyboard?1:4};
@@ -124,8 +126,9 @@ class Service{
    else{const m=await RF.send(this,d.owner,html,{extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:text,fallbackExtra:{entities:report.entities,reply_to_message_id:d.sourceMessageId}});this.store.change(d.key,x=>({...x,controlId:m.message_id}));}
    return;
   }
-  if(d.controlId)await this.bot('editMessageText',{chat_id:d.owner,message_id:d.controlId,text,entities:report.entities,reply_markup:markup});
-  else{const m=await this.tell(d.owner,text,{entities:report.entities,reply_to_message_id:d.sourceMessageId,reply_markup:markup});this.store.change(d.key,x=>({...x,controlId:m.message_id}));}
+  const html=d.analysisOnly?RN.noResult(retryCommand):RN.topicQuestion({kind:String(d.mime||'').startsWith('video/')?'video':'image',summaryLines:d.summaryLines||[],tags:d.tags||[],topicCount:topics.length});
+  if(d.controlId)await RF.send(this,d.owner,html,{messageId:d.controlId,extra:{reply_markup:markup},fallback:text,fallbackExtra:{entities:report.entities,reply_markup:markup}});
+  else{const m=await this.say(d.owner,html,text,{entities:report.entities,reply_to_message_id:d.sourceMessageId,reply_markup:markup});this.store.change(d.key,x=>({...x,controlId:m.message_id}));}
  }
  reusedTags(){return (this.store.read('used_hashtags')?.tags||[]).filter(x=>typeof x==='string').slice(0,300);}
  rememberTags(tags){
@@ -201,13 +204,13 @@ class Service{
    return {next:0,status:'sent',jobKey:d.key,messageId:receipt.messageId,topicId,groupId};
   }catch(e){
    this.store.change(d.key,x=>({...x,status:started?'uncertain':'pending',lastError:/^MEDIA_[A-Z_]+$/.test(e.message)?e.message:'MEDIA_SEND_FAILED'}));
-   await this.tell(d.owner,started?'⚠️ பதிவின் முடிவு உறுதியாகவில்லை. Group-ல் சரிபார்த்த பிறகே மீண்டும் முயற்சிக்க வேண்டும்.':'⚠️ இப்போது பதிவிட முடியவில்லை. Bot-ஐ @'+this.scope.botUsername+' என்ற பெயரில் sender account-ல் Start செய்துள்ளீர்களா என்பதையும் topic கிடைக்கிறதா என்பதையும் சரிபாருங்கள்.').catch(()=>{});
+   await this.say(d.owner,started?RN.publishUncertain():RN.publishFailed(this.scope.botUsername),started?'⚠️ பதிவின் முடிவு உறுதியாகவில்லை. Group-ல் சரிபார்த்த பிறகே மீண்டும் முயற்சிக்க வேண்டும்.':'⚠️ இப்போது பதிவிட முடியவில்லை. Bot-ஐ @'+this.scope.botUsername+' என்ற பெயரில் sender account-ல் Start செய்துள்ளீர்களா என்பதையும் topic கிடைக்கிறதா என்பதையும் சரிபாருங்கள்.').catch(()=>{});
    if(!started)await this.display(this.store.read(d.key)).catch(()=>{});
    return {next:0,status:started?'uncertain':'failed',jobKey:d.key};
   }finally{if(!started||confirmed)await this.cleanup(stage?.botMessageId).catch(()=>{});}
  }
  async requestEdit(d){
-  const p=await this.tell(d.owner,'✏️ புதிய caption-ஐ இந்த message-க்கு Reply செய்து அனுப்புங்கள்.\nCaption முழுவதையும் நீக்க: /empty\nHashtags தேவைப்பட்டால் புதிய caption-லேயே சேர்க்கவும்.',{reply_markup:{force_reply:true,selective:true}});
+  const p=await this.say(d.owner,RN.editPrompt(),'✏️ புதிய caption-ஐ இந்த message-க்கு Reply செய்து அனுப்புங்கள்.\nCaption முழுவதையும் நீக்க: /empty\nHashtags தேவைப்பட்டால் புதிய caption-லேயே சேர்க்கவும்.',{reply_markup:{force_reply:true,selective:true}});
   this.store.change('reply_'+d.owner+'_'+p.message_id,()=>({key:d.key,rev:d.rev,owner:d.owner}));
  }
  async editReply(m,owner){
@@ -236,7 +239,7 @@ class Service{
     {extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:d.receipt.url+'\n\n✅ இந்தப் பதிவின் caption திருத்தப்பட்டது.',
      fallbackExtra:{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ மீண்டும் திருத்து',callback_data:editData}]]}}});
    this.store.change(d.key,x=>({...x,receiptControlId:r.message_id}));return {next:0,status:'edited'};
-  }catch{this.store.change(d.key,x=>({...x,status:started?'uncertain':'sent'}));await this.tell(owner,'⚠️ Caption மாற்றத்தை உறுதிப்படுத்த முடியவில்லை. Group பதிவைச் சரிபாருங்கள்.');return {next:0,status:'edit_failed'};}
+  }catch{this.store.change(d.key,x=>({...x,status:started?'uncertain':'sent'}));await this.say(owner,RN.editFailed(),'⚠️ Caption மாற்றத்தை உறுதிப்படுத்த முடியவில்லை. Group பதிவைச் சரிபாருங்கள்.');return {next:0,status:'edit_failed'};}
  }
  async handle(u){
   const auth=authenticate(u,this.scope,this.me.id),{owner,message:m,callback:cb}=auth;
@@ -245,22 +248,22 @@ class Service{
     if(m.reply_to_message){
      const ref=m.reply_to_message,key=this.jobKey(owner,ref.message_id),existing=this.store.read(key);
      if(existing?.owner===owner&&existing.lastAnalysisCommandId===m.message_id)return {json:{next:0,status:'duplicate_analysis'}};
-     if(existing?.owner===owner&&existing.status==='analysing'){await this.tell(owner,'⏳ இந்த media-க்கு analysis ஏற்கெனவே நடக்கிறது.');return {json:{next:0,status:'analysis_pending'}};}
+     if(existing?.owner===owner&&existing.status==='analysing'){await this.say(owner,RN.analysisBusy(),'⏳ இந்த media-க்கு analysis ஏற்கெனவே நடக்கிறது.');return {json:{next:0,status:'analysis_pending'}};}
      if(existing?.owner===owner&&existing.status==='pending')return await this.startAnalysis(existing,{owner,updateId:u.update_id,commandMessageId:m.message_id});
-     let asset;try{check(this.replyContext||sid(ref.from?.id)===owner&&!ref.from.is_bot,'REPLY_MEDIA_OWNER');asset=parseMedia(this.replyContext?{...ref,media_group_id:undefined}:ref);}catch{await this.tell(owner,'நீங்கள் இந்த bot-க்கு அனுப்பிய image அல்லது video-க்கு Reply செய்து /analyze அனுப்புங்கள்.');return {json:{next:0,status:'reply_media_required'}};}
+     let asset;try{check(this.replyContext||sid(ref.from?.id)===owner&&!ref.from.is_bot,'REPLY_MEDIA_OWNER');asset=parseMedia(this.replyContext?{...ref,media_group_id:undefined}:ref);}catch{await this.say(owner,RN.replyFirst('/analyze'),'நீங்கள் இந்த bot-க்கு அனுப்பிய image அல்லது video-க்கு Reply செய்து /analyze அனுப்புங்கள்.');return {json:{next:0,status:'reply_media_required'}};}
      const analysisKey=this.jobKey(owner,'analysis:'+ref.message_id+':'+m.message_id);let created=false;
      const d=this.store.change(analysisKey,old=>{if(old)return undefined;created=true;return {key:analysisKey,owner,rev:1,status:'pending',analysisOnly:true,createdAt:Date.now(),...asset,analysisApproved:false,analysisConsent:null,tags:[],summaryLines:[]};});
      if(!created)return {json:{next:0,status:'duplicate_analysis'}};
      return await this.startAnalysis(d,{owner,updateId:u.update_id,commandMessageId:m.message_id});
     }
     this.store.change('mode_'+owner,x=>x&&x.updateId>=u.update_id?undefined:{armed:true,updateId:u.update_id,commandMessageId:m.message_id,expiresAt:Date.now()+15*60000});
-    await this.tell(owner,'✨ அடுத்து ஒரு image அல்லது video அனுப்புங்கள். அந்த ஒரு media-க்கு 3–4 வரிச் சுருக்கமும் hashtags-மும் ஒரே பதிலாகத் தரப்படும்.\nஏற்கெனவே அனுப்பிய media-க்கு Reply செய்து /analyze கொடுக்கலாம்.\nரத்து செய்ய: /cancel');
+    await this.say(owner,RN.armed(),'✨ அடுத்து ஒரு image அல்லது video அனுப்புங்கள். அந்த ஒரு media-க்கு 3–4 வரிச் சுருக்கமும் hashtags-மும் ஒரே பதிலாகத் தரப்படும்.\nஏற்கெனவே அனுப்பிய media-க்கு Reply செய்து /analyze கொடுக்கலாம்.\nரத்து செய்ய: /cancel');
     return {json:{next:0,status:'analysis_armed'}};
    }
-   if(/^\/cancel(?:@\w+)?$/.test((m.text||'').trim())){this.store.change('mode_'+owner,x=>x&&x.updateId>=u.update_id?undefined:{...x,armed:false,updateId:u.update_id});await this.tell(owner,'Analysis mode ரத்து செய்யப்பட்டது. இனி நேரடியாக media அனுப்பினால் topic மட்டும் கேட்கப்படும்.');return {json:{next:0,status:'analysis_disarmed'}};}
+   if(/^\/cancel(?:@\w+)?$/.test((m.text||'').trim())){this.store.change('mode_'+owner,x=>x&&x.updateId>=u.update_id?undefined:{...x,armed:false,updateId:u.update_id});await this.say(owner,RN.disarmed(),'Analysis mode ரத்து செய்யப்பட்டது. இனி நேரடியாக media அனுப்பினால் topic மட்டும் கேட்கப்படும்.');return {json:{next:0,status:'analysis_disarmed'}};}
    const edited=await this.editReply(m,owner);if(edited)return {json:edited};
-   if(/^\/(start|help|menu)(?:@\w+)?(?:\s|$)/.test(m.text||'')){await this.tell(owner,'📷 Image அல்லது video அனுப்புங்கள்; caption இருந்தாலும் இல்லாவிட்டாலும் பரவாயில்லை.\nTopic தேர்வு செய்தால் @'+(this.scope.senderLabel||'personal_account')+' பெயரில் பதிவிடப்படும்.\n\n✨ 3–4 வரிச் சுருக்கம் + Hashtags வேண்டுமென்றால் media-க்கு Reply செய்து /analyze அனுப்புங்கள். அல்லது /analyze கொடுத்துவிட்டு அடுத்த ஒரு media அனுப்புங்கள்.\nஏற்கெனவே group-ல் பதிவிட்ட media-க்கு Reply செய்து analyze செய்யலாம்; அது மீண்டும் பதிவாகாது.');return {json:{next:0,status:'help'}};}
-   let asset;try{asset=parseMedia(m);}catch(e){await this.tell(owner,e.message==='MEDIA_ALBUM_NOT_SUPPORTED'?'ஒரு image அல்லது video-வைத் தனியாக அனுப்புங்கள். Album support இன்னும் இல்லை.':'Image அல்லது video அனுப்புங்கள். Caption-ஐ media உடன் சேர்க்கலாம்.');return {json:{next:0,status:'unsupported'}};}
+   if(/^\/(start|help|menu)(?:@\w+)?(?:\s|$)/.test(m.text||'')){await this.say(owner,RN.help(this.scope.senderLabel),'📷 Image அல்லது video அனுப்புங்கள்; caption இருந்தாலும் இல்லாவிட்டாலும் பரவாயில்லை.\nTopic தேர்வு செய்தால் @'+(this.scope.senderLabel||'personal_account')+' பெயரில் பதிவிடப்படும்.\n\n✨ 3–4 வரிச் சுருக்கம் + Hashtags வேண்டுமென்றால் media-க்கு Reply செய்து /analyze அனுப்புங்கள். அல்லது /analyze கொடுத்துவிட்டு அடுத்த ஒரு media அனுப்புங்கள்.\nஏற்கெனவே group-ல் பதிவிட்ட media-க்கு Reply செய்து analyze செய்யலாம்; அது மீண்டும் பதிவாகாது.');return {json:{next:0,status:'help'}};}
+   let asset;try{asset=parseMedia(m);}catch(e){await this.say(owner,RN.unsupported(e.message==='MEDIA_ALBUM_NOT_SUPPORTED'),e.message==='MEDIA_ALBUM_NOT_SUPPORTED'?'ஒரு image அல்லது video-வைத் தனியாக அனுப்புங்கள். Album support இன்னும் இல்லை.':'Image அல்லது video அனுப்புங்கள். Caption-ஐ media உடன் சேர்க்கலாம்.');return {json:{next:0,status:'unsupported'}};}
    const key=this.jobKey(owner,m.message_id);let created=false;
    const d=this.store.change(key,old=>{if(old)return undefined;created=true;return {key,owner,rev:1,status:'pending',createdAt:Date.now(),...asset,analysisApproved:false,analysisConsent:null,tags:[]};});
    if(created){
@@ -276,8 +279,8 @@ class Service{
   check(d&&d.owner===owner&&d.rev===rev&&[d.controlId,d.receiptControlId].includes(m.message_id)&&(d.replyContext?.tag||'')===(this.replyContext?.tag||''),'STALE_BUTTON');
   if(action==='edit'&&['pending','sent'].includes(d.status)){await this.requestEdit(d);return {json:{next:0,status:'await_caption'}};}
   check(['pending','analysing'].includes(d.status),'ALREADY_HANDLED');
-  if(action==='cancel'){this.store.change(key,x=>{check(x.rev===rev&&['pending','analysing'].includes(x.status),'STALE_BUTTON');return {...x,status:'cancelled',rev:x.rev+1};});await feedback.complete(this,key,rev,'cancelled').catch(()=>{});await this.bot('editMessageText',{chat_id:owner,message_id:d.controlId,text:'❌ இந்த draft ரத்து செய்யப்பட்டது.',reply_markup:{inline_keyboard:[]}});return {json:{next:0,status:'cancelled'}};}
-  if(action==='off'){d=this.store.change(key,x=>{check(x.rev===rev&&['pending','analysing'].includes(x.status),'STALE_BUTTON');return {...x,status:x.analysisOnly?'cancelled':'pending',rev:x.rev+1,analysisApproved:false,analysisConsent:null,tags:[],summaryLines:[]};});await feedback.complete(this,key,rev,'cancelled').catch(()=>{});if(d.analysisOnly)await this.bot('editMessageText',{chat_id:owner,message_id:d.controlId,text:'❌ Analysis ரத்து செய்யப்பட்டது.',reply_markup:{inline_keyboard:[]}});else await this.display(d);return {json:{next:0,status:'analysis_off'}};}
+  if(action==='cancel'){this.store.change(key,x=>{check(x.rev===rev&&['pending','analysing'].includes(x.status),'STALE_BUTTON');return {...x,status:'cancelled',rev:x.rev+1};});await feedback.complete(this,key,rev,'cancelled').catch(()=>{});await RF.send(this,owner,RN.cancelled('draft',[[null,'Again : 📷 பதிவிட வேண்டுமென்றால், [[media]]-வை [[மீண்டும்]] அனுப்புங்கள் 🔁']]),{messageId:d.controlId,extra:{reply_markup:{inline_keyboard:[]}},fallback:'❌ இந்த draft ரத்து செய்யப்பட்டது.',fallbackExtra:{reply_markup:{inline_keyboard:[]}}});return {json:{next:0,status:'cancelled'}};}
+  if(action==='off'){d=this.store.change(key,x=>{check(x.rev===rev&&['pending','analysing'].includes(x.status),'STALE_BUTTON');return {...x,status:x.analysisOnly?'cancelled':'pending',rev:x.rev+1,analysisApproved:false,analysisConsent:null,tags:[],summaryLines:[]};});await feedback.complete(this,key,rev,'cancelled').catch(()=>{});if(d.analysisOnly)await RF.send(this,owner,RN.cancelled('Analysis'),{messageId:d.controlId,extra:{reply_markup:{inline_keyboard:[]}},fallback:'❌ Analysis ரத்து செய்யப்பட்டது.',fallbackExtra:{reply_markup:{inline_keyboard:[]}}});else await this.display(d);return {json:{next:0,status:'analysis_off'}};}
   if(action[0]==='p'){check(d.status==='pending','ANALYSIS_PENDING');await this.display(d,Number(action.slice(1)));return {json:{next:0,status:'page'}};}
   check(action[0]==='t','DESTINATION');const {topicId,groupId}=destinations.resolveDestination(this.scope,action.slice(1));
   d=this.store.change(key,x=>{check(x.rev===rev&&x.status==='pending','STALE_BUTTON');return {...x,status:'sending',topicId,targetGroupId:groupId,selectedAt:Date.now(),selectedUpdateId:u.update_id};});
@@ -289,8 +292,8 @@ class Service{
   try{
    d=this.store.change(original.key,x=>{check(x.rev===original.rev&&x.status==='pending','STALE_ANALYZE');return {...x,status:'analysing',rev:x.rev+1,tags:[],summaryLines:[],analysisApproved:false,lastAnalysisCommandId:consent.commandMessageId,analysisConsent:{...consent,revision:x.rev+1,at:Date.now()}};});
    const progress={text:'⏳ சுருக்கமும் hashtags-மும் தயாராகின்றன…',reply_markup:{inline_keyboard:[[{text:d.analysisOnly?'❌ Analysis ரத்து':'AI வேண்டாம் — அசல் பதிவைப் பயன்படுத்து',callback_data:'mc:'+d.key+':'+d.rev+':off'}]]}};
-   if(d.controlId)await this.bot('editMessageText',{chat_id:d.owner,message_id:d.controlId,...progress});
-   else{const m=await this.tell(d.owner,progress.text,{reply_to_message_id:d.sourceMessageId,...progress});d=this.store.change(d.key,x=>({...x,controlId:m.message_id}));}
+   if(d.controlId)await RF.send(this,d.owner,RN.progress(),{messageId:d.controlId,extra:{reply_markup:progress.reply_markup},fallback:progress.text,fallbackExtra:{reply_markup:progress.reply_markup}});
+   else{const m=await this.say(d.owner,RN.progress(),progress.text,{reply_to_message_id:d.sourceMessageId,reply_markup:progress.reply_markup});d=this.store.change(d.key,x=>({...x,controlId:m.message_id}));}
    await feedback.start(this,d).catch(()=>{});
    return await this.analyze(d);
   }catch(e){
@@ -298,7 +301,7 @@ class Service{
    if(!d)throw e;
    await feedback.complete(this,d.key,d.rev,'failure').catch(()=>{});
    this.store.change(d.key,x=>x.rev===d.rev&&x.status==='analysing'?{...x,status:'pending',analysisConsent:null,lastError:/^MEDIA_[A-Z_]+$/.test(e.message)?e.message:'MEDIA_ANALYSIS_FAILED'}:undefined);
-   await this.tell(d.owner,'⚠️ Analysis செய்ய முடியவில்லை. அளவு/நீள வரம்பு அல்லது download பிரச்சினையாக இருக்கலாம்.'+(d.analysisOnly?'':' அசல் media-வை topic தேர்வு செய்து பதிவிடலாம்.'));
+   await this.say(d.owner,RN.analysisFailed(d.analysisOnly),'⚠️ Analysis செய்ய முடியவில்லை. அளவு/நீள வரம்பு அல்லது download பிரச்சினையாக இருக்கலாம்.'+(d.analysisOnly?'':' அசல் media-வை topic தேர்வு செய்து பதிவிடலாம்.'));
    const current=this.store.read(d.key);if(current.status==='pending')await this.display(current);return {json:{next:0,status:'analysis_failed'}};
   }
  }
@@ -307,7 +310,7 @@ class Service{
   this.releaseAnalysis(key,revision);
   const d=this.store.read(key);if(!d||d.status!=='analysing'||d.rev!==revision||d.analysisConsent?.revision!==revision)return {next:0,status:'stale_analysis'};
   let result,summary;try{const parsed=parseResult(raw);summary=summaryLines(parsed);result=selectHashtags(parsed,this.reusedTags());check(!result.needsReview&&result.tags.length>0,'AI_REVIEW_REQUIRED');}catch{
-   this.store.change(key,x=>x.rev===revision&&x.status==='analysing'?{...x,status:'pending',analysisConsent:null}:undefined);await this.tell(d.owner,'⚠️ சுருக்கமும் பொருத்தமான hashtags-மும் நம்பகமாக உருவாக்க முடியவில்லை. இந்த media-க்கு Reply செய்து /analyze கொடுத்து மீண்டும் முயற்சிக்கலாம்.');const current=this.store.read(key);if(current.status==='pending')await this.display(current);return {next:0,status:'analysis_failed'};
+   this.store.change(key,x=>x.rev===revision&&x.status==='analysing'?{...x,status:'pending',analysisConsent:null}:undefined);await this.say(d.owner,RN.unreliable(this.scope.analysisCommand==='mediareport'?'/mediareport':'/analyze'),'⚠️ சுருக்கமும் பொருத்தமான hashtags-மும் நம்பகமாக உருவாக்க முடியவில்லை. இந்த media-க்கு Reply செய்து /analyze கொடுத்து மீண்டும் முயற்சிக்கலாம்.');const current=this.store.read(key);if(current.status==='pending')await this.display(current);return {next:0,status:'analysis_failed'};
   }
   const next=this.store.change(key,x=>x.rev===revision&&x.status==='analysing'?{...x,status:x.analysisOnly?'analysed':'pending',analysisApproved:true,summaryLines:summary,tags:result.tags,rev:x.rev+1}:undefined);
   if(['pending','analysed'].includes(next.status)&&next.analysisApproved){await this.display(next);try{this.rememberTags(result.tags);}catch{}}

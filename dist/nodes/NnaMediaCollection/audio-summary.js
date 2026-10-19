@@ -1,4 +1,5 @@
 'use strict';
+const RN=require('./rich-notices');
 const contract=require('./audio-contract'),feedback=require('./processing-feedback'),context=require('./group-context');
 const LABEL='🎙️ Audio Summary',CANCEL='❌ Audio Summary ரத்து';
 const done=status=>({json:{next:0,audioHandled:true,status}});
@@ -26,7 +27,7 @@ function install(Service,authenticate){
   let cmd=match?.[1]?.toLowerCase();if(m.chat?.type==='private'){if(text===LABEL)cmd='audiosummary';if(text===CANCEL)cmd='cancelaudio';}
   if(m.chat?.type==='supergroup'){
    if(!cmd)return pass();const r=await context.authorize(this,u,this.scope.adminCommandGroupIds||[],this.me.id);if(!r)return pass();context.attach(this,r,{media:true});
-   if(cmd==='audiosummary'&&!m.reply_to_message){await this.tell(String(m.from.id),'Voice / audio பதிவுக்கு Reply செய்து /audiosummary@'+this.scope.botUsername+' அனுப்புங்கள்.');return done('audio_reply_required');}
+   if(cmd==='audiosummary'&&!m.reply_to_message){await this.say(String(m.from.id),RN.replyFirst('/audiosummary@'+this.scope.botUsername,'voice / audio','🎙️'),'Voice / audio பதிவுக்கு Reply செய்து /audiosummary@'+this.scope.botUsername+' அனுப்புங்கள்.');return done('audio_reply_required');}
   }else if(m.chat?.type!=='private')return pass();
   const owner=String(m.from.id),modeKey='audio_mode_'+owner,mode=this.store.read(modeKey),hasAudio=!!(m.voice||m.audio);
   if(!cmd&&!hasAudio){if(mode?.armed&&(text.startsWith('/')||text==='🏠 Main Menu'||text==='🔎 Image / Video Report')){authenticate(u,this.scope,this.me.id);this.store.change(modeKey,x=>({...x,armed:false}));}return pass();}
@@ -36,14 +37,14 @@ function install(Service,authenticate){
   if(cmd==='cancelaudio'){
    this.store.change(modeKey,x=>({...x,armed:false}));const active=this.store.read('audio_active_'+owner),d=active&&this.store.read(active.key);
    if(d?.audioOnly&&d.owner===owner&&d.status==='analysing'){this.store.change(d.key,x=>x.rev===d.rev?{...x,status:'cancelled',rev:x.rev+1}:undefined);await feedback.complete(this,d.key,d.rev,'cancelled').catch(()=>{});}
-   await this.tell(owner,'Audio Summary ரத்து செய்யப்பட்டது. /menu மூலம் முக்கிய menu-க்கு திரும்பலாம்.');return done('audio_cancelled');
+   await this.say(owner,RN.cancelled('Audio Summary',[RN.backToMenu]),'Audio Summary ரத்து செய்யப்பட்டது. /menu மூலம் முக்கிய menu-க்கு திரும்பலாம்.');return done('audio_cancelled');
   }
   if(cmd==='audiosummary'&&!m.reply_to_message){
    let fresh=false;this.store.change(modeKey,x=>{if(x?.updateId>=u.update_id)return undefined;fresh=true;return {armed:true,updateId:u.update_id,expiresAt:Date.now()+15*60000};});if(!fresh)return done('duplicate_audio');
    this.store.change('report_mode_'+owner,x=>({...x,armed:false}));
-   await this.tell(owner,'🎙️ Audio Summary\n\nVoice message அல்லது audio file அனுப்புங்கள். யார் அனுப்பியது, முக்கிய கருத்துகள், சுருக்கம் தமிழில் கிடைக்கும்.\n\nவரம்பு: 20 MB / 20 நிமிடங்கள். ஏற்கெனவே அனுப்பிய audio-க்கு Reply செய்து /audiosummary பயன்படுத்தலாம்.',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});return done('audio_armed');
+   await this.say(owner,RN.audioArmed(),'🎙️ Audio Summary\n\nVoice message அல்லது audio file அனுப்புங்கள். யார் அனுப்பியது, முக்கிய கருத்துகள், சுருக்கம் தமிழில் கிடைக்கும்.\n\nவரம்பு: 20 MB / 20 நிமிடங்கள். ஏற்கெனவே அனுப்பிய audio-க்கு Reply செய்து /audiosummary பயன்படுத்தலாம்.',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});return done('audio_armed');
   }
-  const ref=cmd?m.reply_to_message:m;let a;try{a=asset(ref);}catch(e){await this.tell(owner,errorText(e));return done('audio_invalid');}
+  const ref=cmd?m.reply_to_message:m;let a;try{a=asset(ref);}catch(e){await this.say(owner,RN.audioError(e),errorText(e));return done('audio_invalid');}
   const key=this.jobKey(owner,'audio:'+ref.message_id+':'+m.message_id);let created=false;
   const d=this.store.change(key,x=>{if(x)return undefined;created=true;return {key,owner,rev:1,status:'analysing',audioOnly:true,createdAt:Date.now(),...a,analysisConsent:{commandMessageId:m.message_id,owner,revision:1}};});
   if(!created)return done('duplicate_audio');this.store.change(modeKey,x=>({...x,armed:false}));this.store.change('audio_active_'+owner,()=>({key}));
@@ -57,12 +58,12 @@ function install(Service,authenticate){
    const current=this.store.read(key);if(current?.status!=='analysing'||current.rev!==d.rev)return done('audio_cancelled');
    const binary=await this.ctx.helpers.prepareBinaryData(Buffer.from(bytes),'audio.'+({'audio/mp3':'mp3','audio/ogg':'ogg','audio/mp4':'m4a','audio/wav':'wav','audio/flac':'flac','audio/aac':'aac','audio/webm':'webm'}[mime]),mime);
    return {json:{next:1,audioHandled:true,jobKey:key,revision:d.rev,prompt:contract.prompt},binary:{data:binary}};
-  }catch(e){this.store.change(key,x=>x?.rev===d.rev&&x.status==='analysing'?{...x,status:'failed'}:undefined);await feedback.complete(this,key,d.rev,'failure').catch(()=>{});await this.tell(owner,errorText(e));return done('audio_failed');}
+  }catch(e){this.store.change(key,x=>x?.rev===d.rev&&x.status==='analysing'?{...x,status:'failed'}:undefined);await feedback.complete(this,key,d.rev,'failure').catch(()=>{});await this.say(owner,RN.audioError(e),errorText(e));return done('audio_failed');}
  };
  Service.prototype.finishAudio=async function(key,rev,raw){
   context.reset(this);const d=this.store.read(key);if(!d?.audioOnly||d.status!=='analysing'||d.rev!==rev)return {status:'stale_audio'};
   if(d.replyContext){const r=d.replyContext;if(!this.scope.operatorIds.includes(r.owner)||!(this.scope.adminCommandGroupIds||[]).includes(r.chatId))throw Error('MEDIA_GROUP_SCOPE');const member=await this.bot('getChatMember',{chat_id:r.chatId,user_id:Number(r.owner)});if(!['creator','administrator'].includes(member.status)){this.store.change(key,x=>({...x,status:'cancelled'}));await feedback.complete(this,key,rev,'cancelled').catch(()=>{});return {status:'group_admin_revoked'};}context.attach(this,r,{media:true});}
-  let parsed;try{parsed=contract.parse(raw,d.duration);}catch(e){this.store.change(key,x=>x.rev===rev?{...x,status:'failed'}:undefined);await feedback.complete(this,key,rev,'failure').catch(()=>{});await this.tell(d.owner,errorText(e));return {status:'audio_failed'};}
+  let parsed;try{parsed=contract.parse(raw,d.duration);}catch(e){this.store.change(key,x=>x.rev===rev?{...x,status:'failed'}:undefined);await feedback.complete(this,key,rev,'failure').catch(()=>{});await this.say(d.owner,RN.audioError(e),errorText(e));return {status:'audio_failed'};}
   let claimed=false;this.store.change(key,x=>{if(x?.status!=='analysing'||x.rev!==rev)return undefined;claimed=true;return {...x,status:'sending'};});if(!claimed)return {status:'stale_audio'};
   try{
    const when=new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'}).format(new Date(d.sourceDate*1000));

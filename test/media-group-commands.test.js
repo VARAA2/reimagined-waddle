@@ -15,7 +15,7 @@ function setup(t){
 test('group slash launch verifies current admin, preserves topic and routes to exact private feature',async t=>{
  const s=setup(t);assert.equal((await s.handle(incoming(1,'/analyze@EXAMPLE_BOT'))).json.status,'group_menu');
  assert.equal(s.calls[0].method,'getChatMember');const sent=s.calls[1].body;assert.equal(sent.chat_id,-1001234500000);assert.equal(sent.message_thread_id,10);assert.equal(sent.reply_parameters.message_id,1);assert.equal(sent.reply_markup.inline_keyboard[0][0].url,'https://t.me/example_bot?start=analyze');
- assert.equal(s.store.read('mode_42'),null);assert.equal((await s.handle(incoming(1,'/analyze'))).json.status,'duplicate_group_command');assert.equal(s.calls.filter(c=>c.method==='sendMessage').length,1);
+ assert.equal(s.store.read('mode_42'),null);assert.equal((await s.handle(incoming(1,'/analyze'))).json.status,'duplicate_group_command');assert.equal(s.calls.filter(c=>c.method==='sendMessage'||c.method==='sendRichMessage').length,1);assert.equal(s.calls[1].method,'sendRichMessage');
 });
 test('normal group media, another bot, unknown commands and arguments do not enter private workflow',async t=>{
  const s=setup(t);for(const text of ['hello','/menu@different_bot','/menu blah','/unknown'])assert.equal((await s.handle(incoming(1,text))).json.status,'ignored_group');
@@ -27,7 +27,7 @@ test('unconfigured groups, nonoperators, nonadmins, forwarded anonymous and old 
  s.bot=async()=>({status:'administrator',user:{id:43}});assert.equal((await s.handle(incoming(3))).json.status,'admin_required');
 });
 test('uncertain group launcher delivery never automatically repeats',async t=>{
- const s=setup(t),bot=s.bot;let sends=0;s.bot=async(method,body)=>{if(method==='sendMessage'){sends++;throw Error('timeout');}return bot(method,body);};await assert.rejects(s.handle(incoming(1)),/timeout/);assert.equal((await s.handle(incoming(1))).json.status,'duplicate_group_command');assert.equal(sends,1);
+ const s=setup(t),bot=s.bot;let sends=0;s.bot=async(method,body)=>{if(method==='sendMessage'||method==='sendRichMessage'){sends++;throw Error('timeout');}return bot(method,body);};await assert.rejects(s.handle(incoming(1)),/timeout/);assert.equal((await s.handle(incoming(1))).json.status,'duplicate_group_command');assert.equal(sends,1);
 });
 test('private deep links activate requested feature and still enforce operator identity',async t=>{
  const s=setup(t);let order=0,home=0;s.showOrder=async()=>order++;s.home=async()=>home++;
@@ -62,7 +62,7 @@ test('both private display paths emit exactly two independent complete native mo
   const s=setup(t);s.personal=async f=>f({});s.topics=async()=>[{id:10,title:'Art'}];const d={key:'a'.repeat(20),owner:'42',rev:1,status:analysisOnly?'analysed':'pending',analysisOnly,analysisApproved:true,summaryLines:summary,tags,sourceMessageId:100};s.store.change(d.key,()=>d);await s.display(d);
   const b=s.calls.at(-1).body;
   if(analysisOnly){const html=b.rich_message.html,shown=require('../dist/nodes/NnaMediaCollection/rich-format').plain(html);assert.equal((html.match(/type="copy_text"/g)||[]).length,2);for(const line of summary)assert(shown.includes(line));for(const tag of tags)assert(shown.includes(tag));assert(html.includes('&lt; &gt; &amp;'));continue;}
-  assert.equal(b.entities.length,2);assert.deepEqual(b.entities.map(e=>e.type),['code','code']);assert.deepEqual(b.entities.map(e=>b.text.slice(e.offset,e.offset+e.length)),[summary.join('\n'),tags.join(' ')]);assert(!b.parse_mode);
+  {const html=b.rich_message.html,shown=require('../dist/nodes/NnaMediaCollection/rich-format').plain(html);for(const line of summary)assert(shown.includes(line));assert(shown.includes(tags.join(' ')));assert(html.includes('&lt; &gt; &amp;'));assert(shown.includes('topic'));}
   if(!analysisOnly)assert(b.reply_markup.keyboard.length>0);
  }
 });

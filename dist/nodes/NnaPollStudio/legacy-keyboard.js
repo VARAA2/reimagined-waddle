@@ -27,9 +27,14 @@ function install(Service,authenticate){
   if(typeof text!=='string'||!text||text.length>4096)return p;
   await this.init();
   const body={chat_id:a.owner,text,...(!preview&&Array.isArray(p.entities)&&p.entities.length?{entities:p.entities}:{}),link_preview_options:{is_disabled:true},reply_markup:{keyboard:[...rows,[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false,input_field_placeholder:'கீழே தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}};
-  const sent=await this.bot('sendMessage',body);
-  if(String(sent?.chat?.id)!==a.owner||String(sent?.from?.id)!==String(this.scope.botId)||sent?.from?.is_bot!==true||sent.text!==text||!Number.isSafeInteger(sent.message_id))throw Error('POLL_KEYBOARD_READBACK');
-  for(const e of body.entities||[])if(!(sent.entities||[]).some(x=>x.type===e.type&&x.offset===e.offset&&x.length===e.length&&(e.type!=='custom_emoji'||x.custom_emoji_id===e.custom_emoji_id)&&(e.type!=='text_link'||x.url===e.url)))throw Error('POLL_KEYBOARD_FORMAT');
+  // locked NNA rich look (19 Oct 2026): preview controls get their own page, other menus use p.richHtml when the
+  // workflow gives one; the plain text stays the fallback for an explicit Telegram refusal
+  const html=preview?require('./rich-pages').previewControls(p.mode==='bundle'):typeof p.richHtml==='string'&&p.richHtml.length<=60000?p.richHtml:'';
+  let sent,rich=false;
+  if(html)try{const {text:_t,entities:_e,link_preview_options:_l,...rest}=body;sent=await this.bot('sendRichMessage',{...rest,rich_message:{html}});rich=true;}catch(e){if(!(e.telegramStatus>=400&&e.telegramStatus<500))throw e;}
+  if(!rich)sent=await this.bot('sendMessage',body);
+  if(String(sent?.chat?.id)!==a.owner||String(sent?.from?.id)!==String(this.scope.botId)||sent?.from?.is_bot!==true||!rich&&sent.text!==text||!Number.isSafeInteger(sent.message_id))throw Error('POLL_KEYBOARD_READBACK');
+  if(!rich)for(const e of body.entities||[])if(!(sent.entities||[]).some(x=>x.type===e.type&&x.offset===e.offset&&x.length===e.length&&(e.type!=='custom_emoji'||x.custom_emoji_id===e.custom_emoji_id)&&(e.type!=='text_link'||x.url===e.url)))throw Error('POLL_KEYBOARD_FORMAT');
   const now=Date.now();this.store.change(key(a.owner),()=>({owner:a.owner,keys,messageId:sent.message_id,date:sent.date||Math.floor(now/1000),text,createdAt:now,expiresAt:now+86400000}));
   const d=this.draft(a.owner);if(d){d.active=false;d.keys={};this.save(d);}
   return null;
