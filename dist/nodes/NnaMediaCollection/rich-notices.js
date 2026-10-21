@@ -225,12 +225,7 @@ const groupAnalysisMenu = bot => note('🔎 Group Image / Video Analysis', '🔎
   [null, 'Private : 🔒 Topic [[வரிசை]], 📤 media [[publishing]] தனிப்பட்ட chat-ல் தொடரும் 😊'],
 ], {place: '📍 #NNA group'});
 
-// the topic question after the post: its topic buttons are taken away (rich buttons live inside the html)
-const topicDone = topic => note('✅ Topic தேர்வு முடிந்தது', '✅ POSTED IN THE CHOSEN TOPIC 📌', [
-  [true, `Topic : 📌 ${topic ? String(topic).replace(/\[|\]/g, '') : 'தேர்ந்தெடுத்த topic'}-ல் [[பதிவிடப்பட்டது]] ✅`],
-  [null, 'Receipt : 🧾 முழு [[விவரம்]], [[receipt]]-ல் உள்ளது 👇'],
-]);
-module.exports = {note, topicDone, publishUncertain, publishFailed, albumFailed, alreadySent, alreadyCancelled, busy, editPrompt, editFailed,
+module.exports = {note, publishUncertain, publishFailed, albumFailed, alreadySent, alreadyCancelled, busy, editPrompt, editFailed,
   replyFirst, freshCommand, analysisBusy, armed, disarmed, progress, analysisFailed, unreliable, noResult, cancelled, backToMenu,
   albumBlocked, albumLate, albumAnalyze, orderReset, orderSaved, orderInvalid, orderPage, home, help, unsupported,
   pendingList, albumCollecting, topicQuestion, audioError, audioArmed, reportArmed, openPrivate, groupAnalysisMenu};

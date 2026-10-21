@@ -26,12 +26,11 @@ function install(Service,authenticate){
   const text=preview?(p.mode==='bundle'?'👁 Media மற்றும் article preview மேலே உள்ளன. கீழே உள்ள buttons மூலம் drafts-ஐ உறுதி செய்து destination / நேரம் தேர்வு செய்யுங்கள்.':'👁 Media + caption preview மேலே உள்ளது. கீழே Draft உறுதி செய் அழுத்தி destination / நேரம் தேர்வு செய்யுங்கள். இறுதி உறுதிப்படுத்தலுக்குப் பிறகே பதிவிடப்படும்.'):p.text;
   if(typeof text!=='string'||!text||text.length>4096)return p;
   await this.init();
-  const body={chat_id:a.owner,text,...(!preview&&Array.isArray(p.entities)&&p.entities.length?{entities:p.entities}:{}),link_preview_options:{is_disabled:true},reply_markup:{keyboard:[...rows,[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:true,one_time_keyboard:false,input_field_placeholder:'கீழே தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}};
+  // menus persistent (user, 21 Oct 2026); media preview controls stay as before (user: media parts unchanged)
+  const body={chat_id:a.owner,text,...(!preview&&Array.isArray(p.entities)&&p.entities.length?{entities:p.entities}:{}),link_preview_options:{is_disabled:true},reply_markup:{keyboard:[...rows,[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:!preview,one_time_keyboard:false,input_field_placeholder:'கீழே தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}};
   // locked NNA rich look (19 Oct 2026): preview controls get their own page, other menus use p.richHtml when the
   // workflow gives one; the plain text stays the fallback for an explicit Telegram refusal
-  // preview: the approval buttons are drawn as RICH buttons on this card (user, 21 Oct 2026); the post preview above
-  // itself stays exact and carries no buttons. The reply keyboard below keeps the same actions.
-  const html=preview?require('./rich-pages').previewControls(p.mode==='bundle')+'\n'+require('../NnaMediaCollection/rich-format').buttons(source.map(r=>r.map(b=>[String(b.text),'cb:'+b.additionalFields.callback_data,/^❌/u.test(String(b.text))?'danger':undefined]))):typeof p.richHtml==='string'&&p.richHtml.length<=60000?p.richHtml:'';
+  const html=preview?require('./rich-pages').previewControls(p.mode==='bundle'):typeof p.richHtml==='string'&&p.richHtml.length<=60000?p.richHtml:'';
   let sent,rich=false;
   if(html)try{const {text:_t,entities:_e,link_preview_options:_l,...rest}=body;sent=await this.bot('sendRichMessage',{...rest,rich_message:{html}});rich=true;}catch(e){if(!(e.telegramStatus>=400&&e.telegramStatus<500))throw e;}
   if(!rich)sent=await this.bot('sendMessage',body);

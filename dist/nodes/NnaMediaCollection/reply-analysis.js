@@ -55,7 +55,7 @@ function install(Service,authenticate,parseMedia){
   if(cmd==='mediareport'&&!m.reply_to_message){
    let fresh=false;this.store.change(modeKey,x=>{if(x?.updateId>=u.update_id)return undefined;fresh=true;return {armed:true,updateId:u.update_id,expiresAt:Date.now()+15*60000};});
    if(!fresh)return done('duplicate_report');
-   await this.say(owner,RN.reportArmed(),'🔎 Image / Video Report\n\nஅடுத்து ஒரு image அல்லது video அனுப்புங்கள். English summary + hashtags தனித்தனியாக copy செய்யும் format-ல் கிடைக்கும்.\n\nஏற்கெனவே அனுப்பிய media-க்கு Reply செய்து /mediareport கொடுக்கலாம்.\nரத்து செய்ய: /cancelmedia',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:true,one_time_keyboard:false}});
+   await this.say(owner,RN.reportArmed(),'🔎 Image / Video Report\n\nஅடுத்து ஒரு image அல்லது video அனுப்புங்கள். English summary + hashtags தனித்தனியாக copy செய்யும் format-ல் கிடைக்கும்.\n\nஏற்கெனவே அனுப்பிய media-க்கு Reply செய்து /mediareport கொடுக்கலாம்.\nரத்து செய்ய: /cancelmedia',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});
    return done('report_armed');
   }
   const ref=cmd?m.reply_to_message:m;
