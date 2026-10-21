@@ -68,7 +68,13 @@ function parseResult(raw){
 }
 class Service{
  constructor(ctx,c,b,scope,deps={}){this.ctx=ctx;this.c=c;this.b=b;this.scope=config(c,scope);this.deps=deps;}
+ // in-chat buttons go into the rich html (user rule, 21 Oct 2026); Telegram refusing that -> the request as it was
  async bot(method,body={},timeout=25000){
+  const moved=RF.moveButtons(method,body);
+  if(moved)try{return await this.botCall(method,moved,timeout);}catch(e){if(!(e.telegramStatus>=400&&e.telegramStatus<500))throw e;}
+  return this.botCall(method,body,timeout);
+ }
+ async botCall(method,body={},timeout=25000){
   check(typeof this.b.accessToken==='string'&&/^\d+:[A-Za-z0-9_-]+$/.test(this.b.accessToken),'TOKEN');
   try{const r=await this.ctx.helpers.httpRequest({method:'POST',url:'https://api.telegram.org/bot'+this.b.accessToken+'/'+method,body,json:true,timeout});check(r?.ok,'BOT_RESPONSE');return r.result;}catch(cause){const e=Error('MEDIA_BOT_'+method.toUpperCase()+'_FAILED');const status=cause.statusCode||cause.response?.status||cause.response?.statusCode;const description=JSON.stringify(cause.response?.body||cause.response?.data||cause.description||cause.message||'');if(Number.isInteger(status))e.telegramStatus=status;if(status===400&&/CUSTOM_EMOJI|custom emoji|icon_custom_emoji/i.test(description))e.customEmojiRejected=true;if(status===400&&/REACTION_INVALID|REACTIONS_TOO_MANY|REACTION_EMPTY/i.test(description))e.reactionRejected=true;throw e;}
  }
@@ -200,7 +206,9 @@ class Service{
     {extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:(receipt.topicLabel?receipt.topicLabel+'\n':'')+receipt.url+'\n\n✅ நீங்கள் அனுப்பிய '+mediaLabel+' தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',
      fallbackExtra:{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ Caption திருத்து',callback_data:editData}]]}}})
     .then(m=>this.store.change(d.key,x=>({...x,receiptControlId:m.message_id}))).catch(()=>{});
-   await this.bot('editMessageReplyMarkup',{chat_id:d.owner,message_id:d.controlId,reply_markup:{inline_keyboard:[]}}).catch(()=>{});
+   // the topic buttons are inside the rich question, so the question itself is replaced by a short 'posted' page
+   await this.bot('editMessageText',{chat_id:d.owner,message_id:d.controlId,rich_message:{html:RN.topicDone(receipt.topicLabel)},reply_markup:{inline_keyboard:[]}})
+    .catch(()=>this.bot('editMessageReplyMarkup',{chat_id:d.owner,message_id:d.controlId,reply_markup:{inline_keyboard:[]}})).catch(()=>{});
    return {next:0,status:'sent',jobKey:d.key,messageId:receipt.messageId,topicId,groupId};
   }catch(e){
    this.store.change(d.key,x=>({...x,status:started?'uncertain':'pending',lastError:/^MEDIA_[A-Z_]+$/.test(e.message)?e.message:'MEDIA_SEND_FAILED'}));

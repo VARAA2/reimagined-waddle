@@ -49,7 +49,14 @@ test('album preview sends one native media group and a caption message with appr
  const b=bot(),items=[om.item({message_id:1,...photo(1)}),om.item({message_id:2,...video(2)})];
  const r=await om.preview(b,scope,{operatorId:'42',chatId:'42',topicId:0,text:'Caption',entities:[{type:'bold',offset:0,length:7}],buttons,items});
  assert.deepEqual(b.calls.map(x=>x.method),['sendMediaGroup','sendMessage']);assert.equal(b.calls[0].body.media.length,2);assert.match(b.calls[0].body.media[0].caption,/2 media/);
- assert.equal(b.calls[1].body.reply_to_message_id,r.previewMessageId);assert.deepEqual(b.calls[1].body.reply_markup.inline_keyboard.flat().map(x=>x.callback_data),buttons.map(x=>x.data));assert.equal(r.longCaption,false);
+ assert.equal(b.calls[1].body.reply_to_message_id,r.previewMessageId);assert.equal(b.calls[1].body.reply_markup,undefined);assert.equal(r.longCaption,false);   // private: buttons go on the rich controls card
+});
+test('a caption preview outside the private chat keeps its approval buttons on the preview',async()=>{
+ const b=bot(),items=[om.item({message_id:1,...photo(1)}),om.item({message_id:2,...video(2)})];
+ await om.preview(b,scope,{operatorId:'42',chatId:'-1001234500000',topicId:10,text:'Caption',entities:[],buttons,items});
+ assert.deepEqual(b.calls[1].body.reply_markup.inline_keyboard.flat().map(x=>x.callback_data),buttons.map(x=>x.data));
+ assert.equal(om.richControls({operatorId:'42',chatId:'42',buttons:[{label:'x',data:'mp:43:7:confirm'}]}),false);
+ assert.equal(om.richControls({operatorId:'42',chatId:'42',buttons}),true);
 });
 test('single audio and voice previews use their native Bot API methods',async()=>{
  for(const [body,method] of [[audio(3),'sendAudio'],[voice(4),'sendVoice']]){const b=bot();await om.preview(b,scope,{operatorId:'42',chatId:'42',topicId:0,text:'Caption',entities:[],buttons,items:[om.item({message_id:1,...body})]});assert.equal(b.calls[0].method,method);}

@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-nna-telegram-sender",
-  "version": "0.42.1",
+  "version": "0.43.0",
   "description": "Restricted Telegram personal-account history, operator replies and reaction copying",
   "license": "MIT",
   "repository": {

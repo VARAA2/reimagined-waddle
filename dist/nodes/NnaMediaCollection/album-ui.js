@@ -36,7 +36,7 @@ function topicKeyboard(d,topics,page=0,icons=true,full=false){
  if(d.analysisApproved){const button={text:'🚫 சுருக்கம் + Hashtags நீக்கு'};rows.push([button]);choices.push({button,action:'off'});}
  const cancel={text:'❌ இந்த பதிவை ரத்து செய்'},pending={text:'🗂 காத்திருக்கும் பதிவுகள்'};
  rows.push([pending],[cancel]);choices.push({button:pending,action:'pending'},{button:cancel,action:'cancel'});
- return {page,pages,choices,markup:{keyboard:rows,resize_keyboard:true,is_persistent:false,one_time_keyboard:false,input_field_placeholder:'கீழே topic தேர்வு செய்யுங்கள்'}};
+ return {page,pages,choices,markup:{keyboard:rows,resize_keyboard:true,is_persistent:true,one_time_keyboard:false,input_field_placeholder:'கீழே topic தேர்வு செய்யுங்கள்'}};
 }
 function install(Service,parseMedia){
  const legacy={handle:Service.prototype.handle,display:Service.prototype.display,publish:Service.prototype.publish,requestEdit:Service.prototype.requestEdit,startAnalysis:Service.prototype.startAnalysis};
@@ -66,7 +66,7 @@ function install(Service,parseMedia){
   }
  };
  Service.prototype.showKeyboard=async function(owner,text,choices,rows,extra={},state={},html=''){
-  const m=await this.keyboardSend(owner,text,{...extra,reply_markup:{keyboard:rows,resize_keyboard:true,is_persistent:false,one_time_keyboard:false}},html);
+  const m=await this.keyboardSend(owner,text,{...extra,reply_markup:{keyboard:rows,resize_keyboard:true,is_persistent:true,one_time_keyboard:false}},html);
   const ui={...state,owner,controlId:m.message_id,shownAt:Date.now(),choices:choices.map(x=>({text:x.button.text,action:x.action}))};
   this.store.change('ui_'+owner,()=>ui);
   // Remember every draft keyboard, so a Reply to an older one acts on its own media.

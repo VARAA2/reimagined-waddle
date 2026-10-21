@@ -42,7 +42,7 @@ function install(Service,authenticate){
   if(cmd==='audiosummary'&&!m.reply_to_message){
    let fresh=false;this.store.change(modeKey,x=>{if(x?.updateId>=u.update_id)return undefined;fresh=true;return {armed:true,updateId:u.update_id,expiresAt:Date.now()+15*60000};});if(!fresh)return done('duplicate_audio');
    this.store.change('report_mode_'+owner,x=>({...x,armed:false}));
-   await this.say(owner,RN.audioArmed(),'🎙️ Audio Summary\n\nVoice message அல்லது audio file அனுப்புங்கள். யார் அனுப்பியது, முக்கிய கருத்துகள், சுருக்கம் தமிழில் கிடைக்கும்.\n\nவரம்பு: 20 MB / 20 நிமிடங்கள். ஏற்கெனவே அனுப்பிய audio-க்கு Reply செய்து /audiosummary பயன்படுத்தலாம்.',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});return done('audio_armed');
+   await this.say(owner,RN.audioArmed(),'🎙️ Audio Summary\n\nVoice message அல்லது audio file அனுப்புங்கள். யார் அனுப்பியது, முக்கிய கருத்துகள், சுருக்கம் தமிழில் கிடைக்கும்.\n\nவரம்பு: 20 MB / 20 நிமிடங்கள். ஏற்கெனவே அனுப்பிய audio-க்கு Reply செய்து /audiosummary பயன்படுத்தலாம்.',{reply_markup:{keyboard:[[{text:CANCEL}],[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:true,one_time_keyboard:false}});return done('audio_armed');
   }
   const ref=cmd?m.reply_to_message:m;let a;try{a=asset(ref);}catch(e){await this.say(owner,RN.audioError(e),errorText(e));return done('audio_invalid');}
   const key=this.jobKey(owner,'audio:'+ref.message_id+':'+m.message_id);let created=false;

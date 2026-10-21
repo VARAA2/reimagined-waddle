@@ -78,6 +78,12 @@ function inlineButtons(buttons){
  check(Array.isArray(buttons)&&buttons.length>0&&buttons.every(x=>typeof x?.label==='string'&&typeof x.data==='string'&&Buffer.byteLength(x.data)<=64),'BUTTONS');
  return {inline_keyboard:buttons.map(x=>[{text:x.label,callback_data:x.data}])};
 }
+// same test as Poll Studio renderLegacy(preview): private operator chat + only own tpl/mp/pp/lv callbacks, unique labels
+function richControls(p){
+ const b=p?.buttons;if(String(p?.chatId)!==String(p?.operatorId)||String(p?.chatId).startsWith('-')||p.historyPrompt||!Array.isArray(b)||!b.length)return false;
+ const re=new RegExp('^(tpl|mp|pp|lv):'+String(p.operatorId).replace(/\D/g,'')+':');
+ return b.every(x=>typeof x?.label==='string'&&x.label&&x.label!=='🏠 Main Menu'&&typeof x.data==='string'&&re.test(x.data)&&Buffer.byteLength(x.data)<=64)&&new Set(b.map(x=>x.label)).size===b.length;
+}
 async function preview(bot,scope,p){
  check(scope.operatorIds.includes(sid(p?.operatorId))&&typeof p.chatId==='string'&&typeof p.text==='string'&&p.text.length>0&&p.text.length<=4096&&Array.isArray(p.entities),'PREVIEW_INPUT');
  const items=p.items,kind=composition(items),thread=Number(p.topicId)?{message_thread_id:Number(p.topicId)}:{};
@@ -91,10 +97,12 @@ async function preview(bot,scope,p){
   check(Array.isArray(r)&&r.length===items.length&&r.every((m,i)=>sid(m.chat?.id)===p.chatId&&sid(m.from?.id)===scope.botId&&sentFile(m,items[i].kind)?.file_unique_id===items[i].uniqueId)&&new Set(r.map(m=>sid(m.media_group_id))).size===1,'PREVIEW_MISMATCH');first=r[0].message_id;
  }
  // A Media + Article bundle carries its approval buttons on the article preview that follows.
- const bundle=p.mode==='bundle';
- const t=await bot('sendMessage',{chat_id:p.chatId,text:p.text,entities:p.entities,...thread,reply_to_message_id:first,allow_sending_without_reply:true,link_preview_options:{is_disabled:true},...(bundle?{}:{reply_markup:inlineButtons(p.buttons)})});
+ // Private chat: the approval buttons are drawn as RICH buttons on the 'Preview controls' card that follows (user,
+ // 21 Oct 2026), so this exact caption preview carries none; elsewhere (group topic) they stay on the preview.
+ const bundle=p.mode==='bundle',onCard=richControls(p);
+ const t=await bot('sendMessage',{chat_id:p.chatId,text:p.text,entities:p.entities,...thread,reply_to_message_id:first,allow_sending_without_reply:true,link_preview_options:{is_disabled:true},...(bundle||onCard?{}:{reply_markup:inlineButtons(p.buttons)})});
  check(sid(t?.chat?.id)===p.chatId&&sid(t.from?.id)===scope.botId&&t.text===p.text,'CAPTION_PREVIEW_MISMATCH');
- const keys=(t.reply_markup?.inline_keyboard||[]).flat().map(x=>x.callback_data);check(bundle?keys.length===0:p.buttons.every(x=>keys.includes(x.data)),'PREVIEW_BUTTON_MISSING');
+ const keys=(t.reply_markup?.inline_keyboard||[]).flat().map(x=>x.callback_data);check(bundle||onCard?keys.length===0:p.buttons.every(x=>keys.includes(x.data)),'PREVIEW_BUTTON_MISSING');
  return {...p,previewMessageId:first,captionPreviewMessageId:t.message_id,longCaption:false};
 }
 // The claimed delivery mirrors the single-media contract, with an ordered item list instead of one file.
@@ -261,4 +269,4 @@ async function run(ctx,operation,deps={}){
  const c=await ctx.getCredentials('nnaTelegramSender');
  return publish(ctx,c,b,scope,JSON.parse(ctx.getNodeParameter('deliveryJSON',0)),deps);
 }
-module.exports={OPERATIONS,QUIET_MS,MAX_ITEMS,item,composition,summary,collect,preview,validate,validateBundle,publish,publishBundle,run};
+module.exports={richControls,OPERATIONS,QUIET_MS,MAX_ITEMS,item,composition,summary,collect,preview,validate,validateBundle,publish,publishBundle,run};

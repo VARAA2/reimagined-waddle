@@ -81,6 +81,29 @@ function buttons(rows) {
     return `<tg-button type="url"${st || ' style="primary"'} url="${esc(t)}">${esc(label)}</tg-button>`;
   }).join('') + '</tg-button-row>').join('');
 }
+// Telegram's default inline keyboard -> RICH <tg-button> rows inside the html (user rule, 21 Oct 2026: buttons inside
+// a conversation always use the rich look; probe on the user's phone: callback / url / copy tg-buttons work, also after
+// an edit and next to a reply keyboard). Returns the changed request, or null when there is nothing to move or a button
+// kind has no rich form (then the request goes out unchanged). Callers retry the original request on a Telegram 4xx.
+function moveButtons(method, body) {
+  const html = body?.rich_message?.html, kb = body?.reply_markup?.inline_keyboard;
+  if (!['sendRichMessage', 'editMessageText'].includes(method) || typeof html !== 'string' || !Array.isArray(kb) || !kb.flat().length) return null;
+  const rows = [];
+  for (const row of kb) {
+    const r = [];
+    for (const b of row || []) {
+      const label = String(b?.text ?? '');
+      if (typeof b?.callback_data === 'string') r.push([label, 'cb:' + b.callback_data, /^(❌|🚫)/u.test(label) ? 'danger' : undefined]);
+      else if (typeof b?.url === 'string') r.push([label, b.url]);
+      else if (typeof b?.copy_text?.text === 'string') r.push([label, 'copy:' + b.copy_text.text]);
+      else return null;
+    }
+    if (r.length) rows.push(r);
+  }
+  const {reply_markup, ...rest} = body;
+  // an edit also clears the old inline keyboard of the message
+  return {...rest, rich_message: {...body.rich_message, html: html + '\n' + buttons(rows)}, ...(method === 'editMessageText' ? {reply_markup: {inline_keyboard: []}} : {})};
+}
 function cite(place, when = new Date()) {
   const d = new Intl.DateTimeFormat('en-GB', {timeZone: TZ, day: '2-digit', month: 'short'}).format(when);
   const t = new Intl.DateTimeFormat('en-US', {timeZone: TZ, hour: 'numeric', minute: '2-digit'}).format(when);
@@ -117,4 +140,4 @@ function richExtra(extra = {}) {
   if (reply_to_message_id && !rest.reply_parameters) rest.reply_parameters = {message_id: reply_to_message_id, allow_sending_without_reply: allow_sending_without_reply !== false};
   return rest;
 }
-module.exports = {m, esc, mono, hl, title, pull, sub, tap, DIV, marked, line, ticks, buttons, cite, card, plain, send, richExtra};
+module.exports = {m, esc, mono, hl, title, pull, sub, tap, DIV, marked, line, ticks, buttons, moveButtons, cite, card, plain, send, richExtra};

@@ -60,7 +60,9 @@ class Service{
   this.store=new Store(scope.botId,deps.root||path.join(process.env.N8N_USER_FOLDER||os.homedir(),'.n8n','nna-poll-studio',sid(scope.botId)));
   this.store.change('topics',x=>x||{targets:clone(scope.defaultTargets)});
  }
- async bot(method,body={}){try{const r=await this.ctx.helpers.httpRequest({method:'POST',url:'https://api.telegram.org/bot'+this.b.accessToken+'/'+method,body,json:true,timeout:25000});check(r?.ok,'BOT_RESPONSE');return r.result;}catch(cause){const e=Error('POLL_BOT_'+method.toUpperCase()+'_FAILED'),status=cause?.statusCode||cause?.response?.status||cause?.response?.statusCode;if(Number.isInteger(status))e.telegramStatus=status;throw e;}}
+ // in-chat buttons go into the rich html (user rule, 21 Oct 2026); Telegram refusing that -> the request as it was
+ async bot(method,body={}){const moved=require('../NnaMediaCollection/rich-format').moveButtons(method,body);if(moved)try{return await this.botCall(method,moved);}catch(e){if(!(e.telegramStatus>=400&&e.telegramStatus<500))throw e;}return this.botCall(method,body);}
+ async botCall(method,body={}){try{const r=await this.ctx.helpers.httpRequest({method:'POST',url:'https://api.telegram.org/bot'+this.b.accessToken+'/'+method,body,json:true,timeout:25000});check(r?.ok,'BOT_RESPONSE');return r.result;}catch(cause){const e=Error('POLL_BOT_'+method.toUpperCase()+'_FAILED'),status=cause?.statusCode||cause?.response?.status||cause?.response?.statusCode;if(Number.isInteger(status))e.telegramStatus=status;throw e;}}
  async init(){const me=await this.bot('getMe');check(sid(me.id)===sid(this.scope.botId)&&me.username?.toLowerCase()===this.scope.botUsername.toLowerCase(),'BOT_IDENTITY');return this;}
  async personal(fn){let client;try{client=await(this.deps.createClient||createClient)(this.c);await bounded(client.connect());const me=await bounded(client.getMe());check(!me.bot&&sid(me.id)===sid(this.c.expectedUserId)&&me.username?.toLowerCase()===this.c.expectedUsername.toLowerCase(),'SENDER_IDENTITY');return await fn(client);}finally{if(client)await bounded(client.destroy(),10000).catch(()=>{});}}
  targets(){return(this.store.read('topics')?.targets||[]).filter(t=>this.scope.groups.some(g=>g.id===t.groupId));}
@@ -75,13 +77,13 @@ class Service{
   return this.bot('sendMessage',body);
  }
  async tell(owner,text,buttons,html){return this.rich(html,{chat_id:owner,text,...(buttons?{reply_markup:{inline_keyboard:buttons.map(row=>row)}}:{})});}
- async screen(d,text,rows,html){if(this.replyContext&&/^(content|input_)/.test(d.stage)){text+='\n\n↩️ இந்த bot message-க்கு Reply செய்து பதிலை அனுப்புங்கள்.';if(html)html+=PP.replyHint();}d.keys=Object.fromEntries((rows||[]).flat().map(([label,action])=>[label,action]));d=this.save(d);return this.rich(html,{chat_id:d.owner,text,reply_markup:{keyboard:[...(rows||[]).map(row=>row.map(([label])=>({text:label}))),[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false,input_field_placeholder:'Button தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}});}
+ async screen(d,text,rows,html){if(this.replyContext&&/^(content|input_)/.test(d.stage)){text+='\n\n↩️ இந்த bot message-க்கு Reply செய்து பதிலை அனுப்புங்கள்.';if(html)html+=PP.replyHint();}d.keys=Object.fromEntries((rows||[]).flat().map(([label,action])=>[label,action]));d=this.save(d);return this.rich(html,{chat_id:d.owner,text,reply_markup:{keyboard:[...(rows||[]).map(row=>row.map(([label])=>({text:label}))),[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:true,one_time_keyboard:false,input_field_placeholder:'Button தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}});}
  async home(owner){
   if(this.replyContext){
    const d=this.draft(owner);if(d){d.active=false;d.keys={};this.save(d);}
    return this.rich(PP.groupHome(),{chat_id:owner,text:'#NNA — இந்த topic-ல் பயன்படுத்தலாம்\n\nImage / Video Report, Poll / Quiz / Checklist.\nHistory, template நிர்வாகம், media publishing மற்றும் scheduling தனிப்பட்ட chat-ல் தொடரும்.',reply_markup:{keyboard:[[{text:'🔎 Image / Video Report'}],[{text:'🗳️ Poll / Quiz / Checklist'}],[{text:'📚 Poll Templates'}],[{text:'↗️ தனிப்பட்ட menu',url:'https://t.me/'+this.scope.botUsername+'?start=menu'}]]}});
   }
-  const d=this.draft(owner);if(d){d.active=false;d.keys={};this.save(d);}return this.rich(PP.home(),{chat_id:owner,text:'#NNA — முக்கிய menu\nகீழே உள்ள buttons மூலம் தேர்வு செய்யுங்கள்.',reply_markup:{keyboard:homeRows.map(row=>row.map(text=>({text}))),resize_keyboard:true,is_persistent:false,one_time_keyboard:false}});}
+  const d=this.draft(owner);if(d){d.active=false;d.keys={};this.save(d);}return this.rich(PP.home(),{chat_id:owner,text:'#NNA — முக்கிய menu\nகீழே உள்ள buttons மூலம் தேர்வு செய்யுங்கள்.',reply_markup:{keyboard:homeRows.map(row=>row.map(text=>({text}))),resize_keyboard:true,is_persistent:true,one_time_keyboard:false}});}
  async groupMenu(a){
   const member=await this.bot('getChatMember',{chat_id:a.groupId,user_id:Number(a.owner)});if(!['creator','administrator'].includes(member.status))return {status:'admin_required'};
   const text=a.text.replace(new RegExp('@'+this.scope.botUsername+'\\b','ig'),'').trim(),command=homeCommands[a.text]||text;
