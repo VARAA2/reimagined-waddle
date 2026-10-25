@@ -18,6 +18,7 @@ class NnaTelegramSender {
           { name: 'Inspect Topic Reaction Scope', value: 'inspectTopicReactionScope', action: 'Verify the topic and custom emoji pool without reacting' },
           { name: 'React to Topic Post', value: 'reactToTopicPost', action: 'Apply three persisted random custom reactions to a claimed new topic post' },
           { name: 'Inspect Topic State', value: 'inspectTopicState', action: 'Read whether the configured forum topic is open or closed without changing it' },
+          { name: 'Schedule Weekly Live', value: 'scheduleWeeklyLive', action: 'Keep the next weekly group Live scheduled (next weekday + India time, title from the date); never changes another Live' },
           { name: 'Set Topic State', value: 'setTopicState', action: 'Open or close the configured forum topic, skipping when it already matches' },
           { name: 'Poll Live Attendance', value: 'pollLiveAttendance', action: 'Read who is currently inside the group Live without joining or posting anything' },
           { name: 'Read Message Template', value: 'readMessageTemplate', action: 'Read the text and formatting of specific messages (including custom emoji ids) as a welcome or departure template' },
@@ -75,6 +76,10 @@ class NnaTelegramSender {
     this.description.properties.push(...[
       ['Topic State Group ID','topicStateGroupId','string',''],['Topic State Topic ID','topicStateTopicId','number',0]
     ].map(([displayName,name,type,defaultValue])=>({displayName,name,type,default:defaultValue,required:true,noDataExpression:true,displayOptions:{show:{operation:['inspectTopicState','setTopicState']}}})));
+    this.description.properties.push(...[
+      ['Weekly Live Group ID','weeklyLiveGroupId','string',''],['Weekly Live Weekday (0 = Sunday)','weeklyLiveWeekday','number',0],
+      ['Weekly Live Time (India, HH:mm)','weeklyLiveTimeIst','string','04:00'],['Weekly Live Title ({DD} {MM} {YY} {YYYY} = Live date)','weeklyLiveTitleTemplate','string','']
+    ].map(([displayName,name,type,defaultValue])=>({displayName,name,type,default:defaultValue,required:true,noDataExpression:true,displayOptions:{show:{operation:['scheduleWeeklyLive']}}})));
     this.description.properties.push({displayName:'Topic Action',name:'topicStateAction',type:'options',options:[{name:'Open',value:'open'},{name:'Close',value:'close'}],default:'open',required:true,noDataExpression:true,displayOptions:{show:{operation:['setTopicState']}}});
     this.description.properties.push(...[
       ['Membership Channel ID','membershipChannelId',true],['Membership Extra Allowed Channel ID (optional)','membershipExtraChannelId',false],
@@ -170,6 +175,7 @@ class NnaTelegramSender {
       parameters.report=JSON.parse(this.getNodeParameter('attendanceReportJSON',0));parameters.attendanceExtraGroupId=this.getNodeParameter('attendanceExtraGroupId',0,'');
     }
     if(operation==='pollLiveAttendance')for(const name of ['liveAttendanceGroupId','liveAttendanceReviewGroupId'])parameters[name]=this.getNodeParameter(name,0,'');
+    if(operation==='scheduleWeeklyLive')for(const name of ['weeklyLiveGroupId','weeklyLiveWeekday','weeklyLiveTimeIst','weeklyLiveTitleTemplate'])parameters[name]=this.getNodeParameter(name,0);
     if(['inspectTopicState','setTopicState'].includes(operation)){for(const name of ['topicStateGroupId','topicStateTopicId'])parameters[name]=this.getNodeParameter(name,0);if(operation==='setTopicState')parameters.topicStateAction=this.getNodeParameter('topicStateAction',0);}
     if(['inspectTopicReactionScope','reactToTopicPost'].includes(operation))for(const name of ['topicReactionGroupId','topicReactionTopicId','topicReactionEmojiPool','topicReactionActivatedAt'])parameters[name]=this.getNodeParameter(name,0);
     if(operation==='reactToTopicPost'){

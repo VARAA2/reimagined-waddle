@@ -97,7 +97,7 @@ async function createClient(c) {
 async function runOperation(operation, rawCredentials, p = {}, dependencies = {}) {
   let client, sendStarted = false;
   try {
-    requireThat(['getIdentity', 'sendApprovedReply', 'readTopicHistory', 'sendDirectReply','sendDirectReaction','inspectReactionCopy','copyUserReaction','inspectImageReactionScope','reactToScheduledImage','inspectTopicReactionScope','reactToTopicPost','sendMembershipDirectPart','publishMedia','exportUserHistory','inspectMembershipRecordScope','sendMembershipRecord','inspectTopicState','setTopicState','pollLiveAttendance','sendAttendanceReport','readChannelMembership','readMessageTemplate','sendChannelMemberDirect','sendTopicImageForward'].includes(operation), 'NNA_INVALID_OPERATION');
+    requireThat(['getIdentity', 'sendApprovedReply', 'readTopicHistory', 'sendDirectReply','sendDirectReaction','inspectReactionCopy','copyUserReaction','inspectImageReactionScope','reactToScheduledImage','inspectTopicReactionScope','reactToTopicPost','sendMembershipDirectPart','publishMedia','exportUserHistory','inspectMembershipRecordScope','sendMembershipRecord','inspectTopicState','setTopicState','pollLiveAttendance','sendAttendanceReport','readChannelMembership','readMessageTemplate','sendChannelMemberDirect','sendTopicImageForward','scheduleWeeklyLive'].includes(operation), 'NNA_INVALID_OPERATION');
     const c = validateCredentials(rawCredentials);
     if(operation==='exportUserHistory'){
       try{require('./user-history-export').request(c,p,dependencies.now??Date.now());}
@@ -133,6 +133,10 @@ async function runOperation(operation, rawCredentials, p = {}, dependencies = {}
     }
     if(['inspectTopicState','setTopicState'].includes(operation)){
       topicState.topicStateConfig(p,operation);requireThat(p.topicStateGroupId===c.allowedGroupId,'NNA_TOPIC_STATE_GROUP_NOT_ALLOWED');
+    }
+    if(operation==='scheduleWeeklyLive'){
+      try{requireThat(require('./live-weekly').weeklyConfig(p).groupId===c.allowedGroupId,'NNA_WEEKLY_LIVE_GROUP_NOT_ALLOWED');}
+      catch(e){throw new GuardError(/^NNA_WEEKLY_LIVE_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_WEEKLY_LIVE_CHECK_FAILED');}
     }
     if(['inspectTopicReactionScope','reactToTopicPost'].includes(operation)){
       topicReactions.topicReactionConfig(p);requireThat(p.topicReactionGroupId===c.allowedGroupId,'NNA_TOPIC_REACTION_GROUP_NOT_ALLOWED');
@@ -195,6 +199,10 @@ async function runOperation(operation, rawCredentials, p = {}, dependencies = {}
       requireThat(me.premium===true,'NNA_PREMIUM_ACCOUNT_REQUIRED');
       try{return await topicReactions.reactToTopicPost(operation,client,c,p,bounded,dependencies.now??Date.now());}
       catch(e){throw new GuardError(/^NNA_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_TOPIC_REACTION_CHECK_FAILED');}
+    }
+    if(operation==='scheduleWeeklyLive'){
+      try{return await require('./live-weekly').scheduleWeeklyLive(client,c,p,bounded,dependencies.now??Date.now());}
+      catch(e){throw new GuardError(/^NNA_WEEKLY_LIVE_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_WEEKLY_LIVE_CHECK_FAILED');}
     }
     if(operation==='publishMedia'){
       if(p.delivery?.mode==='live'){
