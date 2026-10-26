@@ -28,17 +28,116 @@ function splitMentionIds(lines){
  for(const l of lines){const m=ID_LINE.exec(l.trim());if(m)ids.push(m[1]);else rest.push(l);}
  return {ids,rest};
 }
+// Rich messages (Bot API message.rich_message.blocks) are re-sent as rich HTML, so bold, quotes, tables, lists and
+// details stay as they were. Media blocks cannot be re-sent from a user account by URL, so they are refused before sending.
+const escH=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function richPlain(t){
+ if(t==null)return '';if(typeof t==='string')return t;if(Array.isArray(t))return t.map(richPlain).join('');
+ if(t.type==='custom_emoji')return t.alternative_text||'';if(t.type==='mathematical_expression')return t.expression||'';
+ if(t.type==='anchor')return '';if(t.type==='button')return richPlain(t.button?.text);
+ return richPlain(t.text);
+}
+const RICH_INLINE={bold:'b',italic:'i',underline:'u',strikethrough:'s',spoiler:'tg-spoiler',subscript:'sub',superscript:'sup',marked:'mark',code:'code'};
+function richInline(t){
+ if(t==null)return '';if(typeof t==='string')return escH(t).replace(/\n/g,'<br>');if(Array.isArray(t))return t.map(richInline).join('');
+ const inner=()=>richInline(t.text),tag=RICH_INLINE[t.type];
+ if(tag)return `<${tag}>${inner()}</${tag}>`;
+ switch(t.type){
+  case 'url':return `<a href="${escH(t.url)}">${inner()}</a>`;
+  case 'email_address':return `<a href="mailto:${escH(t.email_address)}">${inner()}</a>`;
+  case 'phone_number':return `<a href="tel:${escH(t.phone_number)}">${inner()}</a>`;
+  case 'text_mention':return Number.isSafeInteger(t.user?.id)?`<a href="tg://user?id=${t.user.id}">${inner()}</a>`:inner();
+  case 'custom_emoji':return /^[1-9]\d{0,19}$/.test(t.custom_emoji_id||'')?`<tg-emoji emoji-id="${t.custom_emoji_id}">${escH(t.alternative_text||'🙂')}</tg-emoji>`:escH(t.alternative_text||'');
+  case 'date_time':return Number.isSafeInteger(t.unix_time)?`<tg-time unix="${t.unix_time}"${t.date_time_format?` format="${escH(t.date_time_format)}"`:''}>${inner()}</tg-time>`:inner();
+  case 'mathematical_expression':return `<tg-math>${escH(t.expression)}</tg-math>`;
+  case 'anchor':return `<a name="${escH(t.name)}"></a>`;
+  case 'anchor_link':return `<a href="#${escH(t.anchor_name)}">${inner()}</a>`;
+  case 'reference':return `<tg-reference name="${escH(t.name)}">${inner()}</tg-reference>`;
+  case 'reference_link':return `<a href="#${escH(t.reference_name)}">${inner()}</a>`;
+  case 'button':return richInline(t.button?.text);
+  default:return inner(); // mention, hashtag, cashtag, bot_command: Telegram detects these again from the text
+ }
+}
+const RICH_MEDIA=['photo','video','animation','audio','voice_note','document','collage','slideshow'];
+const richCite=c=>c==null||c===''?'':`<cite>${richInline(c)}</cite>`;
+const richBlocks=bs=>(bs||[]).map(richBlock).join('');
+// Paragraph-only content is joined with line breaks (quote boxes and list items look the same as in the original).
+const richFlow=bs=>(bs||[]).every(b=>b?.type==='paragraph')?(bs||[]).map(b=>richInline(b.text)).join('<br>'):richBlocks(bs);
+function richCell(c){
+ const tag=c.is_header?'th':'td';
+ const at=(c.colspan>1?` colspan="${c.colspan}"`:'')+(c.rowspan>1?` rowspan="${c.rowspan}"`:'')+(['left','center','right'].includes(c.align)?` align="${c.align}"`:'')+(['top','middle','bottom'].includes(c.valign)?` valign="${c.valign}"`:'');
+ return `<${tag}${at}>${richInline(c.text)}</${tag}>`;
+}
+function richList(b){
+ const items=b.items||[];
+ const ordered=items.length>0&&items.every(i=>Number.isSafeInteger(i.value)||/^(?:\d{1,4}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,8})[.)]?$/.test(String(i.label||'').trim()));
+ const li=items.map(i=>`<li${ordered&&Number.isSafeInteger(i.value)?` value="${i.value}"`:''}>${i.has_checkbox?`<input type="checkbox"${i.is_checked?' checked':''}>`:''}${richFlow(i.blocks)}</li>`).join('');
+ return ordered?`<ol>${li}</ol>`:`<ul>${li}</ul>`;
+}
+function richBlock(b){
+ need(b&&typeof b==='object'&&!RICH_MEDIA.includes(b.type),'NNA_RICH_MEDIA_NOT_SUPPORTED');
+ switch(b.type){
+  case 'paragraph':return `<p>${richInline(b.text)}</p>`;
+  case 'heading':{const n=Math.min(6,Math.max(1,Number(b.size)||1));return `<h${n}>${richInline(b.text)}</h${n}>`;}
+  case 'pre':return /^[\w+#-]{1,32}$/.test(b.language||'')?`<pre><code class="language-${b.language}">${escH(richPlain(b.text))}</code></pre>`:`<pre>${escH(richPlain(b.text))}</pre>`;
+  case 'footer':return `<footer>${richInline(b.text)}</footer>`;
+  case 'divider':return '<hr/>';
+  case 'mathematical_expression':return `<tg-math-block>${escH(b.expression)}</tg-math-block>`;
+  case 'anchor':return `<a name="${escH(b.name)}"></a>`;
+  case 'list':return richList(b);
+  case 'blockquote':return `<blockquote>${richFlow(b.blocks)}${richCite(b.credit)}</blockquote>`;
+  case 'expandable_blockquote':return `<blockquote expandable>${richInline(b.text)}${richCite(b.credit)}</blockquote>`;
+  case 'pullquote':return `<aside>${richInline(b.text)}${richCite(b.credit)}</aside>`;
+  case 'table':{
+   const cap=b.caption==null||b.caption===''?'':`<caption>${richInline(b.caption)}</caption>`;
+   const rows=(b.cells||[]).map(r=>'<tr>'+(r||[]).filter(c=>c&&c.text!==undefined).map(richCell).join('')+'</tr>').join('');
+   return `<table${b.is_bordered?' bordered':''}${b.is_striped?' striped':''}${b.is_compact?' compact':''}>${cap}${rows}</table>`;
+  }
+  case 'details':return `<details${b.is_open?' open':''}><summary>${richInline(b.summary)}</summary>${richBlocks(b.blocks)}</details>`;
+  case 'map':{const l=b.location||{};need(Number.isFinite(l.latitude)&&Number.isFinite(l.longitude),'NNA_RICH_BLOCK_NOT_SUPPORTED');return `<tg-map lat="${l.latitude}" long="${l.longitude}" zoom="${Number(b.zoom)||14}"/>`;}
+  case 'buttons':return ''; // buttons of another bot do not work in a personal message
+  default:need(b.text!==undefined,'NNA_RICH_BLOCK_NOT_SUPPORTED');return `<p>${richInline(b.text)}</p>`;
+ }
+}
+// Plain text of a block, for the delivery log and the claim check only.
+function richBlockPlain(b){
+ if(!b||typeof b!=='object')return '';
+ if(b.type==='list')return (b.items||[]).map(i=>`${i.label||'•'} ${(i.blocks||[]).map(richBlockPlain).join('\n')}`).join('\n');
+ if(b.type==='table')return (b.cells||[]).map(r=>(r||[]).map(c=>richPlain(c?.text)).join(' | ')).join('\n');
+ if(b.type==='details')return [richPlain(b.summary),...(b.blocks||[]).map(richBlockPlain)].join('\n');
+ if(b.type==='blockquote')return (b.blocks||[]).map(richBlockPlain).join('\n');
+ if(b.type==='divider')return '──────────';
+ if(b.type==='mathematical_expression')return b.expression||'';
+ return richPlain(b.text);
+}
+const richText=rm=>(rm?.blocks||[]).map(richBlockPlain).join('\n');
+// The target link is a paragraph of its own, first or last, as in plain requests.
+function richRequest(rm){
+ const blocks=[...rm.blocks];
+ const plain=b=>b?.type==='paragraph'?richPlain(b.text).trim():null;
+ while(blocks.length&&plain(blocks[0])==='')blocks.shift();while(blocks.length&&plain(blocks.at(-1))==='')blocks.pop();
+ const isLink=s=>s!=null&&/^https:\/\/(?:t\.me|telegram\.me)\/\S+$/i.test(s);
+ const first=isLink(plain(blocks[0])),last=blocks.length>1&&isLink(plain(blocks.at(-1)));
+ need(first!==last,'NNA_PUT_ONE_TARGET_LINK_ON_FIRST_OR_LAST_LINE');
+ const target=targetFromUrl(plain(first?blocks.shift():blocks.pop()));
+ const body=blocks.map(richBlockPlain).join('\n').trim();
+ const html=richBlocks(blocks);
+ need(body.length>0&&html.length<=100000,'NNA_REPLY_TEXT_1_TO_4096_REQUIRED');
+ return {target,body,html};
+}
 function parseDirectRequest(update, config, now=Date.now()) {
  const operators=operatorIds(config.allowedOperatorIds),m=update?.message;
  if(!m||update.edited_message||update.callback_query||!Number.isSafeInteger(update.update_id)||!operators.includes(m.from?.id)||m.from?.is_bot!==false||m.sender_chat)return null;
  const privateChat=m.chat?.type==='private'&&m.chat.id===m.from.id;
  const groupChat=m.chat?.type==='supergroup'&&String(m.chat.id)===String(config.reviewChatId)&&[2,3].includes(m.message_thread_id);
  if(!privateChat&&!groupChat)return null;
- if(typeof m.text!=='string'||!/(?:https:\/\/)?(?:t\.me|telegram\.me)\//i.test(m.text))return null;
+ const rich=typeof m.text!=='string'&&Array.isArray(m.rich_message?.blocks);
+ if(!/(?:https:\/\/)?(?:t\.me|telegram\.me)\//i.test(rich?richText(m.rich_message):typeof m.text==='string'?m.text:''))return null;
  const base={operatorId:String(m.from.id),requestKey:`direct:${config.botId}:${m.chat.id}:${m.message_id}`,chatId:String(m.chat.id),topicId:groupChat?m.message_thread_id:0,incomingMessageId:m.message_id};
  try {
   need(!m.forward_origin&&!m.forward_date&&!m.forward_from&&!m.via_bot_id,'NNA_FORWARD_NOT_DIRECT_INSTRUCTION');
   need(Number.isSafeInteger(m.message_id)&&m.message_id>0&&Number.isSafeInteger(m.date)&&m.date*1000<=now+30000&&now-m.date*1000<=86400000,'NNA_STALE_DIRECT_REQUEST');
+  if(rich){const r=richRequest(m.rich_message);return {...base,kind:'direct',rich:true,targetUrl:r.target.url,body:r.body,html:r.html,target:r.target,mentionIds:[],update};}
   // The target is a standalone first or last line. All remaining text stays literal.
   const split=splitMentionIds(m.text.replace(/\r\n/g,'\n').split('\n'));
   const lines=split.rest,mentionIds=split.ids;
@@ -70,15 +169,16 @@ async function sendDirect(client,c,p,bounded,now=Date.now()) {
  need(event?.kind==='direct','NNA_INVALID_DIRECT_REQUEST');
  need(p.claimValidated===true&&p.claimRequestKey===event.requestKey&&p.claimOperatorId===event.operatorId&&p.claimBody===event.body&&p.claimUrl===event.targetUrl,'NNA_DIRECT_CLAIM_REQUIRED');
  const target=event.target;const {group,peer,source,topic}=await resolveTarget(client,target,bounded);
- const final=await buildMentions(client,event,source,peer,bounded);
+ const final=event.rich?{text:'',entities:[],mentioned:[]}:await buildMentions(client,event,source,peer,bounded);
  const rid=randomId(c.expectedUserId,event.requestKey);
+ const content=event.rich?{message:'',richMessage:new Api.InputRichMessageHTML({html:event.html})}:{message:final.text,entities:final.entities};
  let result;
  try {
-  result=await bounded(client.invoke(new Api.messages.SendMessage({peer,message:final.text,entities:final.entities,randomId:rid,noWebpage:true,sendAs:new Api.InputPeerSelf(),replyTo:new Api.InputReplyToMessage({replyToMsgId:target.messageId,...(topic?{topMsgId:topic}:{})})})));
+  result=await bounded(client.invoke(new Api.messages.SendMessage({peer,...content,randomId:rid,noWebpage:true,sendAs:new Api.InputPeerSelf(),replyTo:new Api.InputReplyToMessage({replyToMsgId:target.messageId,...(topic?{topMsgId:topic}:{})})})));
   const updates=result.updates||[];const sentId=updates.find(x=>x.className==='UpdateMessageID'&&String(x.randomId)===String(rid))?.id||(result.className==='UpdateShortSentMessage'?result.id:0);
   need(Number.isSafeInteger(sentId)&&sentId>0,'NNA_DELIVERY_UNCONFIRMED');
   const sent=updates.map(x=>x.message).find(x=>x?.id===sentId)||(await bounded(client.getMessages(peer,{ids:[sentId]})))[0];
-  need(sent?.out===true&&sent.message===final.text&&mentionsKept(sent,final)&&String(sent.fromId?.userId)===String(c.expectedUserId)&&String(utils.getPeerId(sent.peerId))===String(utils.getPeerId(group))&&sent.replyTo?.replyToMsgId===target.messageId,'NNA_DELIVERY_UNCONFIRMED');
+  need(sent?.out===true&&(event.rich?Boolean(sent.richMessage):sent.message===final.text&&mentionsKept(sent,final))&&String(sent.fromId?.userId)===String(c.expectedUserId)&&String(utils.getPeerId(sent.peerId))===String(utils.getPeerId(group))&&sent.replyTo?.replyToMsgId===target.messageId,'NNA_DELIVERY_UNCONFIRMED');
   return {status:'sent',requestKey:event.requestKey,operatorId:event.operatorId,senderId:String(c.expectedUserId),targetChatId:String(utils.getPeerId(group)),replyToMessageId:target.messageId,topicId:topic,sentId,targetUrl:event.targetUrl,mentioned:final.mentioned};
  }catch{throw new Error('NNA_DELIVERY_UNCONFIRMED');}
 }
@@ -148,4 +248,4 @@ async function resolveTarget(client,target,bounded){
  need(!target.topicId||(group.forum===true&&topic===target.topicId),'NNA_SOURCE_WRONG_TOPIC');
  return {group,peer,source,topic};
 }
-module.exports={operatorIds,targetFromUrl,parseDirectRequest,randomId,sendDirect,resolveTarget,buildMentions,splitMentionIds,slotsOf};
+module.exports={operatorIds,targetFromUrl,parseDirectRequest,randomId,sendDirect,resolveTarget,buildMentions,splitMentionIds,slotsOf,richText,richRequest};
