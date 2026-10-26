@@ -111,10 +111,40 @@ function richBlockPlain(b){
  return richPlain(b.text);
 }
 const richText=rm=>(rm?.blocks||[]).map(richBlockPlain).join('\n');
-// The target link is a paragraph of its own, first or last, as in plain requests.
+// Part of a rich text: plain characters a..b, formatting kept (used to cut the link line out of a paragraph).
+function richSub(t,a,b){
+ let pos=0;
+ const walk=x=>{
+  if(x==null)return null;
+  if(typeof x==='string'){const s=pos;pos+=x.length;const part=x.slice(Math.max(0,a-s),Math.max(0,Math.min(x.length,b-s)));return part||null;}
+  if(Array.isArray(x)){const r=x.map(walk).filter(y=>y!=null);return r.length?r:null;}
+  if(x.text===undefined||['custom_emoji','mathematical_expression','button'].includes(x.type)){const s=pos,n=richPlain(x).length;pos+=n;return s>=a&&s+n<=b&&s<b?x:null;}
+  const inner=walk(x.text);return inner==null?null:{...x,text:inner};
+ };
+ return walk(t);
+}
+// Telegram often puts the link and the next line in one paragraph ("link\ntext"): give the link line its own paragraph.
+function splitLinkLine(blocks,isLink){
+ const out=[...blocks];
+ const at=(i,first)=>{
+  const b=out[i];if(b?.type!=='paragraph')return;
+  const p=richPlain(b.text),cut=first?p.indexOf('\n'):p.lastIndexOf('\n');
+  if(cut<0)return;
+  const line=first?p.slice(0,cut):p.slice(cut+1);if(!isLink(line.trim()))return;
+  const rest=first?richSub(b.text,cut+1,p.length):richSub(b.text,0,cut);
+  const link={type:'paragraph',text:line.trim()},keep=rest==null||!richPlain(rest).trim()?[]:[{...b,text:rest}];
+  out.splice(i,1,...(first?[link,...keep]:[...keep,link]));
+ };
+ at(0,true);if(out.length)at(out.length-1,false);
+ return out;
+}
+// The target link is a line of its own at the very start or end, as in plain requests.
 function richRequest(rm){
- const blocks=[...rm.blocks];
+ const linkLine=s=>/^https:\/\/(?:t\.me|telegram\.me)\/\S+$/i.test(s);
  const plain=b=>b?.type==='paragraph'?richPlain(b.text).trim():null;
+ let blocks=[...rm.blocks];
+ while(blocks.length&&plain(blocks[0])==='')blocks.shift();while(blocks.length&&plain(blocks.at(-1))==='')blocks.pop();
+ blocks=splitLinkLine(blocks,linkLine);
  while(blocks.length&&plain(blocks[0])==='')blocks.shift();while(blocks.length&&plain(blocks.at(-1))==='')blocks.pop();
  const isLink=s=>s!=null&&/^https:\/\/(?:t\.me|telegram\.me)\/\S+$/i.test(s);
  const first=isLink(plain(blocks[0])),last=blocks.length>1&&isLink(plain(blocks.at(-1)));

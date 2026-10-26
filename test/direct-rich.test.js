@@ -64,3 +64,16 @@ test('rich reply is sent as InputRichMessageHTML from the personal account, as a
 test('a sent message without rich content is not counted as delivered',async()=>{
  await assert.rejects(sendDirect(client(false),credentials,params(),x=>x,now),/UNCONFIRMED/);
 });
+test('link and the next line in one paragraph (real request 27 Oct 2026): the link line is cut out, the rest keeps its format',()=>{
+ const url='https://t.me/c/1234567/30';
+ const b=[{type:'paragraph',text:[{type:'url',text:url,url},'\nஅருட்பெருஞ்ஜோதி🔥']},{type:'paragraph',text:{type:'bold',text:'📝 R K'}}];
+ const e=parseDirectRequest(event({blocks:b}),cfg,now);
+ assert.equal(e.kind,'direct');assert.equal(e.targetUrl,url);assert.equal(e.html,'<p>அருட்பெருஞ்ஜோதி🔥</p><p><b>📝 R K</b></p>');
+ const end=[{type:'paragraph',text:[{type:'bold',text:'நன்றி'},' 🙏\n',{type:'url',text:url,url}]}];
+ const f=parseDirectRequest(event({blocks:end}),cfg,now);
+ assert.equal(f.targetUrl,url);assert.equal(f.html,'<p><b>நன்றி</b> 🙏</p>');
+ const mid=[{type:'paragraph',text:['வணக்கம்\n',{type:'url',text:url,url},'\nமீண்டும்']}];
+ assert.equal(parseDirectRequest(event({blocks:mid}),cfg,now).error,'NNA_PUT_ONE_TARGET_LINK_ON_FIRST_OR_LAST_LINE');
+ const bold=[{type:'paragraph',text:{type:'bold',text:url+'\nதலைப்பு'}}];
+ assert.equal(parseDirectRequest(event({blocks:bold}),cfg,now).html,'<p><b>தலைப்பு</b></p>');
+});
