@@ -27,7 +27,7 @@ function install(Service,authenticate){
   if(typeof text!=='string'||!text||text.length>4096)return p;
   await this.init();
   // menus persistent (user, 21 Oct 2026); media preview controls stay as before (user: media parts unchanged)
-  const body={chat_id:a.owner,text,...(!preview&&Array.isArray(p.entities)&&p.entities.length?{entities:p.entities}:{}),link_preview_options:{is_disabled:true},reply_markup:{keyboard:[...rows,[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:!preview,one_time_keyboard:false,input_field_placeholder:'கீழே தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}};
+  const body={chat_id:a.owner,text,...(!preview&&Array.isArray(p.entities)&&p.entities.length?{entities:p.entities}:{}),link_preview_options:{is_disabled:true},reply_markup:{keyboard:[...rows,[{text:'🏠 Main Menu'}]],resize_keyboard:true,is_persistent:false,one_time_keyboard:false,input_field_placeholder:'கீழே தேர்வு செய்யுங்கள் அல்லது message அனுப்புங்கள்'}};
   // locked NNA rich look (19 Oct 2026): preview controls get their own page, other menus use p.richHtml when the
   // workflow gives one; the plain text stays the fallback for an explicit Telegram refusal
   const html=preview?require('./rich-pages').previewControls(p.mode==='bundle'):typeof p.richHtml==='string'&&p.richHtml.length<=60000?p.richHtml:'';
