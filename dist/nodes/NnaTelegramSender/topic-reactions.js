@@ -10,7 +10,7 @@ function topicReactionEvent(u,p,now=Date.now()){
  topicReactionConfig(p);const m=u?.message;
  if(!Number.isSafeInteger(u?.update_id)||u.update_id<0||!m||u.edited_message||u.callback_query||m.chat?.type!=='supergroup'||String(m.chat.id)!==p.topicReactionGroupId||m.message_thread_id!==p.topicReactionTopicId||m.is_topic_message!==true||!Number.isSafeInteger(m.message_id)||m.message_id<=0||m.message_id===p.topicReactionTopicId||!Number.isSafeInteger(m.date))return null;
  const t=m.date*1000;if(t<Date.parse(p.topicReactionActivatedAt)||t>now+30000||now-t>1800000)return null;
- const hasContent=typeof m.text==='string'&&m.text.length>0||Array.isArray(m.photo)&&m.photo.length>0||['video','document','audio','voice','animation','sticker','video_note','poll','contact','location','venue','dice'].some(k=>m[k]&&typeof m[k]==='object');
+ const hasContent=typeof m.text==='string'&&m.text.length>0||Array.isArray(m.rich_message?.blocks)&&m.rich_message.blocks.length>0||Array.isArray(m.photo)&&m.photo.length>0||['video','document','audio','voice','animation','sticker','video_note','poll','contact','location','venue','dice'].some(k=>m[k]&&typeof m[k]==='object');
  if(!hasContent)return null;
  return {requestKey:`topic-reaction:${p.topicReactionGroupId}:${m.message_id}`,messageId:m.message_id,topicId:p.topicReactionTopicId,chatId:p.topicReactionGroupId,messageDate:m.date,targetUrl:`https://t.me/c/${p.topicReactionGroupId.slice(4)}/${p.topicReactionTopicId}/${m.message_id}`,update:u};
 }
@@ -43,7 +43,8 @@ async function reactToTopicPost(operation,client,c,p,bounded,now=Date.now()){
  if(!claim)return {verified:true,senderId:String(c.expectedUserId),groupId:p.topicReactionGroupId,topicId:p.topicReactionTopicId,topicName,customEmojiPool:pool};
  const {e,ids}=claim,m=(await bounded(client.getMessages(peer,{ids:[e.messageId]})))[0];
  if(m?.className!=='Message'||m.id!==e.messageId||String(utils.getPeerId(m.peerId))!==p.topicReactionGroupId||!m.replyTo?.forumTopic||Number(m.replyTo.replyToTopId||m.replyTo.replyToMsgId)!==p.topicReactionTopicId||Number(m.date)!==e.messageDate)throw Error('NNA_TOPIC_REACTION_SOURCE_MISMATCH');
- const source=e.update.message;if(m.editDate||!(m.message||m.media)||m.message!==(source.text||source.caption||''))throw Error('NNA_TOPIC_REACTION_SOURCE_CHANGED');
+ // Rich (formatted) posts: Bot API sends rich_message.blocks and no text; MTProto has richMessage and an empty message.
+ const source=e.update.message,rich=Array.isArray(source.rich_message?.blocks);if(m.editDate||!(m.message||m.media||m.richMessage)||(rich?!m.richMessage:m.message!==(source.text||source.caption||'')))throw Error('NNA_TOPIC_REACTION_SOURCE_CHANGED');
  const before=m.reactions?.results?.some(r=>Number(r.count)>0)?await getReactions(client,peer,e.messageId,bounded):[];
  const own=before.filter(r=>String(r.peerId?.userId)===String(c.expectedUserId)).map(r=>r.reaction).filter(reactionKey),wanted=ids.map(id=>new Api.ReactionCustomEmoji({documentId:bigInt(id)}));
  const info={senderId:String(c.expectedUserId),requestKey:e.requestKey,targetChatId:p.topicReactionGroupId,targetMessageId:e.messageId,topicId:p.topicReactionTopicId,customEmojiIds:ids};

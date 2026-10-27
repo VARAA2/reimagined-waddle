@@ -70,3 +70,9 @@ test('node prevents retry and cross-execution claims without reading credentials
  const ctx={getNodeParameter:k=>values[k],getInputData:()=>[{json:{}}],getCredentials:async()=>c,getNode:()=>({retryOnFail:false}),getExecutionId:()=> 'current'};
  await assert.rejects(node.execute.call(ctx),/EXECUTION_MISMATCH/);ctx.getNode=()=>({retryOnFail:true});await assert.rejects(node.execute.call(ctx),/DISABLE_RETRY/);
 });
+test('rich (Markdown) text posts qualify and get a rich source readback',async()=>{
+ const u=event();delete u.message.text;u.message.rich_message={blocks:[{type:'paragraph',text:'Example'}]};assert.ok(topicReactionEvent(u,cfg,now));
+ const e=event();delete e.message.text;e.message.rich_message={blocks:[]};assert.equal(topicReactionEvent(e,cfg,now),null);
+ const f=fake(),p=params();delete p.update.message.text;p.update.message.rich_message={blocks:[{type:'paragraph',text:'Example'}]};f.m.message='';f.m.richMessage={};assert.equal((await run(f,p)).status,'reacted');
+ const g=fake(),q=params();delete q.update.message.text;q.update.message.rich_message={blocks:[{type:'paragraph',text:'Example'}]};g.m.message='';await assert.rejects(run(g,q),/SOURCE/);assert.equal(g.writes,0);
+});
