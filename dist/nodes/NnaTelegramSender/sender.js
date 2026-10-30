@@ -97,7 +97,7 @@ async function createClient(c) {
 async function runOperation(operation, rawCredentials, p = {}, dependencies = {}) {
   let client, sendStarted = false;
   try {
-    requireThat(['getIdentity', 'sendApprovedReply', 'readTopicHistory', 'sendDirectReply','sendDirectReaction','inspectReactionCopy','copyUserReaction','inspectImageReactionScope','reactToScheduledImage','inspectTopicReactionScope','reactToTopicPost','sendMembershipDirectPart','publishMedia','exportUserHistory','inspectMembershipRecordScope','sendMembershipRecord','inspectTopicState','setTopicState','pollLiveAttendance','sendAttendanceReport','readChannelMembership','readMessageTemplate','sendChannelMemberDirect','sendTopicImageForward','scheduleWeeklyLive'].includes(operation), 'NNA_INVALID_OPERATION');
+    requireThat(['getIdentity', 'sendApprovedReply', 'readTopicHistory', 'sendDirectReply','sendDirectReaction','inspectReactionCopy','copyUserReaction','inspectImageReactionScope','reactToScheduledImage','inspectTopicReactionScope','reactToTopicPost','sendMembershipDirectPart','publishMedia','exportUserHistory','inspectMembershipRecordScope','sendMembershipRecord','inspectTopicState','setTopicState','pollLiveAttendance','sendAttendanceReport','readChannelMembership','readMessageTemplate','sendChannelMemberDirect','sendTopicImageForward','sendReplyNotice','scheduleWeeklyLive'].includes(operation), 'NNA_INVALID_OPERATION');
     const c = validateCredentials(rawCredentials);
     if(operation==='exportUserHistory'){
       try{require('./user-history-export').request(c,p,dependencies.now??Date.now());}
@@ -114,6 +114,10 @@ async function runOperation(operation, rawCredentials, p = {}, dependencies = {}
     if(operation==='sendChannelMemberDirect'){
       try{require('./channel-member-dm').precheck(c,p,dependencies.now??Date.now());}
       catch(e){throw new GuardError(/^NNA_(CHANNELDM|MEMBER)_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_CHANNELDM_CHECK_FAILED');}
+    }
+    if(operation==='sendReplyNotice'){
+      try{require('./reply-notice').precheck(c,p);}
+      catch(e){throw new GuardError(/^NNA_REPLYNOTICE_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_REPLYNOTICE_CHECK_FAILED');}
     }
     if(operation==='sendTopicImageForward'){
       try{require('./topic-image-forward').precheck(c,p,dependencies.now??Date.now());}
@@ -174,6 +178,10 @@ async function runOperation(operation, rawCredentials, p = {}, dependencies = {}
     if(operation==='sendChannelMemberDirect'){
       try{return await require('./channel-member-dm').runDirect(operation,client,c,p,bounded,dependencies.now??Date.now());}
       catch(e){throw new GuardError(/^NNA_(CHANNELDM|MEMBER)_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_CHANNELDM_CHECK_FAILED');}
+    }
+    if(operation==='sendReplyNotice'){
+      try{return await require('./reply-notice').run(operation,client,c,p,bounded,dependencies.now??Date.now());}
+      catch(e){throw new GuardError(/^NNA_REPLYNOTICE_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_REPLYNOTICE_CHECK_FAILED');}
     }
     if(operation==='sendTopicImageForward'){
       try{return await require('./topic-image-forward').run(operation,client,c,p,bounded,dependencies.now??Date.now());}

@@ -24,6 +24,7 @@ class NnaTelegramSender {
           { name: 'Read Message Template', value: 'readMessageTemplate', action: 'Read the text and formatting of specific messages (including custom emoji ids) as a welcome or departure template' },
           { name: 'Send Channel Member Direct Message', value: 'sendChannelMemberDirect', action: 'Send one claimed welcome or departure message to a person who just joined or left a channel' },
           { name: 'Send Topic Image Forward', value: 'sendTopicImageForward', action: 'Send one claimed new topic photo with sender and post links to one configured person' },
+          { name: 'Send Reply Notice', value: 'sendReplyNotice', action: 'Tell one person privately which operator accounts replied to their group message, with the reply URLs' },
           { name: 'Read Channel Membership', value: 'readChannelMembership', action: 'Read who joined or left a channel or group from the admin log without changing anything' },
           { name: 'Send Attendance Report', value: 'sendAttendanceReport', action: 'Send the weekly Live attendance report as the personal account with clickable name mentions' },
           { name: 'Publish Confirmed Media', value: 'publishMedia', action: 'Post or schedule a claimed image or video to configured forum topics' },
@@ -104,6 +105,13 @@ class NnaTelegramSender {
       {displayName:'Claim Execution ID',name:'topicFwdClaimExecutionId',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendTopicImageForward']}}}
     );
     this.description.properties.push(
+      {displayName:'Reply Notice Scope JSON',name:'replyNoticeScopeJSON',type:'string',default:'',required:true,noDataExpression:true,displayOptions:{show:{operation:['sendReplyNotice']}}},
+      {displayName:'Reply Notice JSON',name:'replyNoticeJSON',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendReplyNotice']}}},
+      {displayName:'Claim Validated',name:'replyNoticeClaimValidated',type:'boolean',default:false,required:true,displayOptions:{show:{operation:['sendReplyNotice']}}},
+      {displayName:'Claim Request Key',name:'replyNoticeClaimRequestKey',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendReplyNotice']}}},
+      {displayName:'Claim Execution ID',name:'replyNoticeClaimExecutionId',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendReplyNotice']}}}
+    );
+    this.description.properties.push(
       {displayName:'Attendance Report JSON',name:'attendanceReportJSON',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendAttendanceReport']}}},
       {displayName:'Attendance Extra Allowed Group ID (optional)',name:'attendanceExtraGroupId',type:'string',default:'',required:false,noDataExpression:true,displayOptions:{show:{operation:['sendAttendanceReport']}}}
     );
@@ -168,6 +176,12 @@ class NnaTelegramSender {
       if(String(this.getNodeParameter('topicFwdClaimExecutionId',0))!==String(this.getExecutionId()))throw Error('NNA_CLAIM_EXECUTION_MISMATCH');
       parameters.scope=JSON.parse(this.getNodeParameter('topicFwdScopeJSON',0));parameters.update=JSON.parse(this.getNodeParameter('topicFwdUpdateJSON',0));
       parameters.claimValidated=this.getNodeParameter('topicFwdClaimValidated',0);parameters.claimRequestKey=this.getNodeParameter('topicFwdClaimRequestKey',0);
+    }
+    if(operation==='sendReplyNotice'){
+      if(this.getNode().retryOnFail)throw Error('NNA_DISABLE_RETRY_ON_FAIL');
+      if(String(this.getNodeParameter('replyNoticeClaimExecutionId',0))!==String(this.getExecutionId()))throw Error('NNA_CLAIM_EXECUTION_MISMATCH');
+      parameters.scope=JSON.parse(this.getNodeParameter('replyNoticeScopeJSON',0));parameters.notice=JSON.parse(this.getNodeParameter('replyNoticeJSON',0));
+      parameters.claimValidated=this.getNodeParameter('replyNoticeClaimValidated',0);parameters.claimRequestKey=this.getNodeParameter('replyNoticeClaimRequestKey',0);
     }
     if(operation==='readChannelMembership')for(const name of ['membershipChannelId','membershipExtraChannelId','membershipSinceEventId','membershipActivatedAt'])parameters[name]=this.getNodeParameter(name,0,'');
     if(operation==='sendAttendanceReport'){
