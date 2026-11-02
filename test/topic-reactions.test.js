@@ -76,3 +76,11 @@ test('rich (Markdown) text posts qualify and get a rich source readback',async()
  const f=fake(),p=params();delete p.update.message.text;p.update.message.rich_message={blocks:[{type:'paragraph',text:'Example'}]};f.m.message='';f.m.richMessage={};assert.equal((await run(f,p)).status,'reacted');
  const g=fake(),q=params();delete q.update.message.text;q.update.message.rich_message={blocks:[{type:'paragraph',text:'Example'}]};g.m.message='';await assert.rejects(run(g,q),/SOURCE/);assert.equal(g.writes,0);
 });
+test('standard emoji pool (👍 👎 ❤) reacts with plain reactions and skips custom document lookup',async()=>{
+ const std={...cfg,topicReactionEmojiPool:'👍,👎,❤️'},f=fake(),invoke=f.client.invoke;let docLookups=0;
+ f.client.invoke=async r=>{if(r.className==='messages.GetCustomEmojiDocuments')docLookups++;return invoke(r);};
+ const p={...std,update:event(),claimValidated:true,claimRequestKey:'topic-reaction:-1001234567:30',selectedEmojiIds:['👍','👎','❤'],claimEmojiIds:'👍,👎,❤️'};
+ const r=await run(f,p);assert.equal(r.status,'reacted');assert.deepEqual(r.customEmojiIds,['👍','👎','❤']);assert.equal(docLookups,0);
+ assert.equal((await run(f,p)).status,'already_present');assert.equal(f.writes,1);
+ assert.throws(()=>topicReactionClaim({...p,topicReactionEmojiPool:'👍,👎,abc'},now),/CONFIG_INVALID/);
+});
