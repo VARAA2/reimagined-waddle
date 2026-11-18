@@ -34,3 +34,10 @@ test('wrong topic or inaccessible group cannot send; uncertain RPC never retries
  const c=client();const p=params();p.update.message.text=p.update.message.text.replace('/10/30','/99/30');p.claimUrl=p.claimUrl.replace('/10/30','/99/30');await assert.rejects(sendDirect(c,credentials,p,x=>x,now),/WRONG_TOPIC/);assert.equal(c.count,0);
  const d=client();let count=0;d.invoke=async()=>{count++;throw new Error('network');};await assert.rejects(sendDirect(d,credentials,params(),x=>x,now),/UNCONFIRMED/);assert.equal(count,1);
 });
+test('0.53.1: review topics 1121 and 1123 take link replies; other topics and photo captions do not',()=>{
+ const mk=(thread,extra={})=>{const u=event('https://t.me/c/1234567/30\nHello');u.message.chat={id:-1001234567,type:'supergroup'};u.message.message_thread_id=thread;Object.assign(u.message,extra);return u;};
+ for(const t of [2,3,1121,1123])assert.equal(parseDirectRequest(mk(t),cfg,now).kind,'direct');
+ for(const t of [1,4,1122,1126])assert.equal(parseDirectRequest(mk(t),cfg,now),null);
+ const photo=mk(1123);photo.message.caption=photo.message.text;delete photo.message.text;photo.message.photo=[{file_id:'x'}];
+ assert.equal(parseDirectRequest(photo,cfg,now),null);
+});

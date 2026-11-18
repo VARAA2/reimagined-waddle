@@ -24,6 +24,11 @@ class NnaTelegramSender {
           { name: 'Read Message Template', value: 'readMessageTemplate', action: 'Read the text and formatting of specific messages (including custom emoji ids) as a welcome or departure template' },
           { name: 'Send Channel Member Direct Message', value: 'sendChannelMemberDirect', action: 'Send one claimed welcome or departure message to a person who just joined or left a channel' },
           { name: 'Send Topic Image Forward', value: 'sendTopicImageForward', action: 'Send one claimed new topic photo with sender and post links to one configured person' },
+          { name: 'Cancel Scheduled Message', value: 'cancelScheduledMessage', action: 'Delete one claimed message from the account Telegram Scheduled list' },
+          { name: 'Read Group Chats', value: 'readGroupChats', action: 'Read (never send, never mark read, never join) the account groups, forum topics or one group history' },
+          { name: 'Read Private Chats', value: 'readPrivateChats', action: 'Read (never send, never mark read) the account private one-to-one chats or one chat history' },
+          { name: 'Check Scheduled Message', value: 'checkScheduledMessage', action: 'Read whether one message is still in the account Telegram Scheduled list' },
+          { name: 'Send Scheduled Message', value: 'sendScheduledMessage', action: 'Send one owner-scheduled rich (HTML) message to the own chat, a private user or an allowed group topic' },
           { name: 'Send Reply Notice', value: 'sendReplyNotice', action: 'Tell one person privately which operator accounts replied to their group message, with the reply URLs' },
           { name: 'Read Channel Membership', value: 'readChannelMembership', action: 'Read who joined or left a channel or group from the admin log without changing anything' },
           { name: 'Send Attendance Report', value: 'sendAttendanceReport', action: 'Send the weekly Live attendance report as the personal account with clickable name mentions' },
@@ -105,6 +110,13 @@ class NnaTelegramSender {
       {displayName:'Claim Execution ID',name:'topicFwdClaimExecutionId',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendTopicImageForward']}}}
     );
     this.description.properties.push(
+      {displayName:'Group Read JSON',name:'groupReadJSON',type:'string',default:'{"mode":"groups","limit":50}',required:true,displayOptions:{show:{operation:['readGroupChats']}}},
+      {displayName:'Private Read JSON',name:'privateReadJSON',type:'string',default:'{"mode":"dialogs","limit":20}',required:true,displayOptions:{show:{operation:['readPrivateChats']}}},
+      {displayName:'Scheduled Message Scope JSON',name:'schedScopeJSON',type:'string',default:'{"allowedGroupIds":[],"allowPrivate":true}',required:true,noDataExpression:true,displayOptions:{show:{operation:['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage']}}},
+      {displayName:'Scheduled Message JSON',name:'schedMessageJSON',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage']}}},
+      {displayName:'Claim Validated',name:'schedClaimValidated',type:'boolean',default:false,required:true,displayOptions:{show:{operation:['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage']}}},
+      {displayName:'Claim Request Key',name:'schedClaimRequestKey',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage']}}},
+      {displayName:'Claim Execution ID',name:'schedClaimExecutionId',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage']}}},
       {displayName:'Reply Notice Scope JSON',name:'replyNoticeScopeJSON',type:'string',default:'',required:true,noDataExpression:true,displayOptions:{show:{operation:['sendReplyNotice']}}},
       {displayName:'Reply Notice JSON',name:'replyNoticeJSON',type:'string',default:'',required:true,displayOptions:{show:{operation:['sendReplyNotice']}}},
       {displayName:'Claim Validated',name:'replyNoticeClaimValidated',type:'boolean',default:false,required:true,displayOptions:{show:{operation:['sendReplyNotice']}}},
@@ -176,6 +188,14 @@ class NnaTelegramSender {
       if(String(this.getNodeParameter('topicFwdClaimExecutionId',0))!==String(this.getExecutionId()))throw Error('NNA_CLAIM_EXECUTION_MISMATCH');
       parameters.scope=JSON.parse(this.getNodeParameter('topicFwdScopeJSON',0));parameters.update=JSON.parse(this.getNodeParameter('topicFwdUpdateJSON',0));
       parameters.claimValidated=this.getNodeParameter('topicFwdClaimValidated',0);parameters.claimRequestKey=this.getNodeParameter('topicFwdClaimRequestKey',0);
+    }
+    if(operation==='readGroupChats')parameters.groupRead=JSON.parse(this.getNodeParameter('groupReadJSON',0));
+    if(operation==='readPrivateChats')parameters.privateRead=JSON.parse(this.getNodeParameter('privateReadJSON',0));
+    if(['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage'].includes(operation)){
+      if(this.getNode().retryOnFail)throw Error('NNA_DISABLE_RETRY_ON_FAIL');
+      if(String(this.getNodeParameter('schedClaimExecutionId',0))!==String(this.getExecutionId()))throw Error('NNA_CLAIM_EXECUTION_MISMATCH');
+      parameters.scope=JSON.parse(this.getNodeParameter('schedScopeJSON',0));parameters.message=JSON.parse(this.getNodeParameter('schedMessageJSON',0));
+      parameters.claimValidated=this.getNodeParameter('schedClaimValidated',0);parameters.claimRequestKey=this.getNodeParameter('schedClaimRequestKey',0);parameters.claimExecutionId=this.getNodeParameter('schedClaimExecutionId',0);
     }
     if(operation==='sendReplyNotice'){
       if(this.getNode().retryOnFail)throw Error('NNA_DISABLE_RETRY_ON_FAIL');

@@ -194,12 +194,8 @@ class Service{
     confirmed=true;return {messageId:mid,topicId,groupId,topicLabel:destinations.topicLabel(chosen,this.scope),caption:final.caption,entities:final.captionEntities,url:'https://t.me/c/'+groupId.slice(4)+'/'+topicId+'/'+mid};
    });
    this.store.change(d.key,x=>({...x,status:'sent',receipt,sentAt:Date.now()}));
-   const mediaLabel=d.mime.startsWith('image/')?'படம்':'வீடியோ';
-   const editData='mc:'+d.key+':'+d.rev+':edit';
-   await RF.send(this,d.owner,RR.receiptPage({kind:d.mime.startsWith('image/')?'image':'video',topicLabel:receipt.topicLabel,caption:receipt.caption,url:receipt.url,editData,groupLabel:destinations.groups(this.scope).find(g=>g.groupId===groupId)?.label||'#NNA MEDIA COLLECTION'}),
-    {extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:(receipt.topicLabel?receipt.topicLabel+'\n':'')+receipt.url+'\n\n✅ நீங்கள் அனுப்பிய '+mediaLabel+' தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',
-     fallbackExtra:{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ Caption திருத்து',callback_data:editData}]]}}})
-    .then(m=>this.store.change(d.key,x=>({...x,receiptControlId:m.message_id}))).catch(()=>{});
+   // 0.58.0: one receipt card per media; a re-post (copy) replaces it with one card listing every topic.
+   await this.sendReceipt(this.store.read(d.key)).catch(()=>{});
    await this.bot('editMessageReplyMarkup',{chat_id:d.owner,message_id:d.controlId,reply_markup:{inline_keyboard:[]}}).catch(()=>{});
    return {next:0,status:'sent',jobKey:d.key,messageId:receipt.messageId,topicId,groupId};
   }catch(e){
@@ -208,6 +204,35 @@ class Service{
    if(!started)await this.display(this.store.read(d.key)).catch(()=>{});
    return {next:0,status:started?'uncertain':'failed',jobKey:d.key};
   }finally{if(!started||confirmed)await this.cleanup(stage?.botMessageId).catch(()=>{});}
+ }
+ // 0.58.0 (Claude 14 Nov 2026): every topic a media went to (original + sent copies), for the one receipt card.
+ postedTopics(o){
+  const copies=(o.copies||[]).map(c=>this.store.read(c.key)).filter(c=>c&&c.status==='sent'&&c.receipt);
+  return [o.receipt,...copies.map(c=>c.receipt)].filter(r=>r&&r.url).map(r=>({label:String(r.topicLabel||'topic'),url:r.url,groupId:r.groupId||this.scope.groupId}));
+ }
+ // Delete this bot's private-chat messages (and the owner's own messages: bots may delete incoming messages in private chats).
+ async deleteOwn(owner,ids){
+  ids=[...new Set((ids||[]).filter(positive))];if(!ids.length)return;
+  try{await this.bot('deleteMessages',{chat_id:owner,message_ids:ids});}catch{for(const id of ids)await this.bot('deleteMessage',{chat_id:owner,message_id:id}).catch(()=>{});}
+ }
+ // The one "Media பதிவிடப்பட்டது" card of a media. d may be a copy: the card belongs to the original and lists all topics;
+ // the card it replaces (earlier receipt) is deleted once the new one is sent.
+ async sendReceipt(d,{edited=false}={}){
+  const o=d.copyOf?(this.store.read(d.copyOf)||d):d;if(!o?.receipt)return null;
+  const kind=o.albumId?'album':String(o.mime||'').startsWith('image/')?'image':'video';
+  const topics=this.postedTopics(o),count=o.assets?.length||1,old=o.receiptControlId;
+  const editData=o.albumId?'':'mc:'+o.key+':'+o.rev+':edit';
+  const groupLabel=destinations.groups(this.scope).find(g=>g.groupId===(o.receipt.groupId||this.scope.groupId))?.label||'#NNA MEDIA COLLECTION';
+  const what=kind==='album'?count+' media கொண்ட Album':kind==='image'?'படம்':'வீடியோ';
+  const fallback=topics.map(t=>t.label+'\n'+t.url).join('\n\n')+'\n\n'+(edited?'✅ இந்தப் பதிவின் caption திருத்தப்பட்டது.':'✅ நீங்கள் அனுப்பிய '+what+' '+(topics.length>1?topics.length+' topics-ல்':'தேர்ந்தெடுத்த topic-ல்')+' பதிவிடப்பட்டது.');
+  const m=await RF.send(this,o.owner,RR.receiptPage({kind,count,topics,topicLabel:topics[0]?.label,caption:o.receipt.caption||'',url:topics[0]?.url,editData,edited,groupLabel}),
+   {extra:{reply_parameters:{message_id:o.sourceMessageId,allow_sending_without_reply:true}},fallback,
+    fallbackExtra:{reply_to_message_id:o.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,...(editData?{reply_markup:{inline_keyboard:[[{text:edited?'✏️ மீண்டும் திருத்து':'✏️ Caption திருத்து',callback_data:editData}]]}}:{})}});
+  if(!positive(m?.message_id))return m;
+  this.store.change(o.key,x=>({...x,receiptControlId:m.message_id}));
+  if(d.key!==o.key)this.store.change(d.key,x=>({...x,receiptControlId:m.message_id}));
+  if(old&&old!==m.message_id)await this.deleteOwn(o.owner,[old]).catch(()=>{});
+  return m;
  }
  async requestEdit(d){
   const p=await this.say(d.owner,RN.editPrompt(),'✏️ புதிய caption-ஐ இந்த message-க்கு Reply செய்து அனுப்புங்கள்.\nCaption முழுவதையும் நீக்க: /empty\nHashtags தேவைப்பட்டால் புதிய caption-லேயே சேர்க்கவும்.',{reply_markup:{force_reply:true,selective:true}});
@@ -220,25 +245,33 @@ class Service{
   check(caption.length<=4096,'CAPTION_LENGTH');
   let d=this.store.change(link.key,x=>{check(x&&x.owner===owner&&x.rev===link.rev&&['pending','sent'].includes(x.status),'STALE_EDIT');return {...x,status:x.status==='sent'?'editing':'pending',caption,entities:m.text==='/empty'?[]:m.entities||[],tags:[],summaryLines:[],analysisApproved:false,analysisConsent:null,rev:x.rev+1};});
   if(d.status==='pending'){await this.display(d);return {next:0,status:'caption_updated'};}
-  let started=false;
+  let started=false;const copyEdits=[];
   try{
+   // 0.58.0: the same caption change goes to every topic copy of this media (a copy whose post changed by hand is skipped).
+   const copies=(d.copies||[]).map(c=>this.store.read(c.key)).filter(c=>c&&c.status==='sent'&&c.receipt?.messageId);
    await this.personal(async(client,me)=>{
-    const groupId=d.receipt.groupId||this.scope.groupId;destinations.assertDestination(this.scope,groupId,d.receipt.topicId);
-    const peer=await this.group(client,groupId),[old]=await bounded(client.getMessages(peer,{ids:[d.receipt.messageId]}));
-    check(old?.className==='Message'&&sid(old.fromId?.userId)===sid(this.c.expectedUserId)&&old.message===d.receipt.caption&&Number(old.replyTo?.replyToTopId||old.replyTo?.replyToMsgId)===d.receipt.topicId,'EDIT_TARGET_CHANGED');
     if(caption.length>1024)check(me.premium===true,'PREMIUM_CAPTION_REQUIRED');
     const entities=caption?media.caption(caption,d.entities):[];
-    if(old.message===caption&&(old.entities||[]).length===entities.length&&entities.every(e=>media.entityMatches(old.entities,e)))return;
-    started=true;
-    await bounded(client.invoke(new Api.messages.EditMessage({peer,id:d.receipt.messageId,message:caption,entities})));
-    const [sent]=await bounded(client.getMessages(peer,{ids:[d.receipt.messageId]}));check(sent?.message===caption&&entities.every(e=>media.entityMatches(sent.entities,e)),'EDIT_UNCONFIRMED');
+    const editOne=async(r,strict)=>{
+     const groupId=r.groupId||this.scope.groupId;destinations.assertDestination(this.scope,groupId,r.topicId);
+     const peer=await this.group(client,groupId),[old]=await bounded(client.getMessages(peer,{ids:[r.messageId]}));
+     const ok=old?.className==='Message'&&sid(old.fromId?.userId)===sid(this.c.expectedUserId)&&old.message===r.caption&&Number(old.replyTo?.replyToTopId||old.replyTo?.replyToMsgId)===r.topicId;
+     if(!ok){check(!strict,'EDIT_TARGET_CHANGED');return false;}
+     if(old.message===caption&&(old.entities||[]).length===entities.length&&entities.every(e=>media.entityMatches(old.entities,e)))return true;
+     if(strict)started=true;
+     await bounded(client.invoke(new Api.messages.EditMessage({peer,id:r.messageId,message:caption,entities})));
+     const [sent]=await bounded(client.getMessages(peer,{ids:[r.messageId]}));check(sent?.message===caption&&entities.every(e=>media.entityMatches(sent.entities,e)),'EDIT_UNCONFIRMED');
+     return true;
+    };
+    await editOne(d.receipt,true);
+    for(const c of copies){try{if(await editOne(c.receipt,false))copyEdits.push(c.key);}catch{}}
    });
    this.store.change(d.key,x=>({...x,status:'sent',receipt:{...x.receipt,caption,entities:x.entities}}));
-   const editData='mc:'+d.key+':'+d.rev+':edit';
-   const r=await RF.send(this,owner,RR.receiptPage({kind:String(d.mime||'').startsWith('video/')?'video':'image',topicLabel:d.receipt.topicLabel,caption,url:d.receipt.url,editData,edited:true}),
-    {extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:d.receipt.url+'\n\n✅ இந்தப் பதிவின் caption திருத்தப்பட்டது.',
-     fallbackExtra:{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true,reply_markup:{inline_keyboard:[[{text:'✏️ மீண்டும் திருத்து',callback_data:editData}]]}}});
-   this.store.change(d.key,x=>({...x,receiptControlId:r.message_id}));return {next:0,status:'edited'};
+   for(const key of copyEdits)this.store.change(key,x=>({...x,caption,entities:d.entities,receipt:{...x.receipt,caption,entities:d.entities}}));
+   // one card stays: the new "caption திருத்தப்பட்டது" card replaces the old receipt; the prompt and the owner's caption message go.
+   await this.sendReceipt(this.store.read(d.key),{edited:true}).catch(()=>{});
+   await this.deleteOwn(owner,[ref.message_id,m.message_id]).catch(()=>{});
+   return {next:0,status:'edited',copies:copyEdits.length};
   }catch{this.store.change(d.key,x=>({...x,status:started?'uncertain':'sent'}));await this.say(owner,RN.editFailed(),'⚠️ Caption மாற்றத்தை உறுதிப்படுத்த முடியவில்லை. Group பதிவைச் சரிபாருங்கள்.');return {next:0,status:'edit_failed'};}
  }
  async handle(u){

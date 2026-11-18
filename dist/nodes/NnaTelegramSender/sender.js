@@ -97,7 +97,7 @@ async function createClient(c) {
 async function runOperation(operation, rawCredentials, p = {}, dependencies = {}) {
   let client, sendStarted = false;
   try {
-    requireThat(['getIdentity', 'sendApprovedReply', 'readTopicHistory', 'sendDirectReply','sendDirectReaction','inspectReactionCopy','copyUserReaction','inspectImageReactionScope','reactToScheduledImage','inspectTopicReactionScope','reactToTopicPost','sendMembershipDirectPart','publishMedia','exportUserHistory','inspectMembershipRecordScope','sendMembershipRecord','inspectTopicState','setTopicState','pollLiveAttendance','sendAttendanceReport','readChannelMembership','readMessageTemplate','sendChannelMemberDirect','sendTopicImageForward','sendReplyNotice','scheduleWeeklyLive'].includes(operation), 'NNA_INVALID_OPERATION');
+    requireThat(['getIdentity', 'sendApprovedReply', 'readTopicHistory', 'sendDirectReply','sendDirectReaction','inspectReactionCopy','copyUserReaction','inspectImageReactionScope','reactToScheduledImage','inspectTopicReactionScope','reactToTopicPost','sendMembershipDirectPart','publishMedia','exportUserHistory','inspectMembershipRecordScope','sendMembershipRecord','inspectTopicState','setTopicState','pollLiveAttendance','sendAttendanceReport','readChannelMembership','readMessageTemplate','sendChannelMemberDirect','sendTopicImageForward','sendReplyNotice','scheduleWeeklyLive','sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage','readPrivateChats','readGroupChats'].includes(operation), 'NNA_INVALID_OPERATION');
     const c = validateCredentials(rawCredentials);
     if(operation==='exportUserHistory'){
       try{require('./user-history-export').request(c,p,dependencies.now??Date.now());}
@@ -114,6 +114,18 @@ async function runOperation(operation, rawCredentials, p = {}, dependencies = {}
     if(operation==='sendChannelMemberDirect'){
       try{require('./channel-member-dm').precheck(c,p,dependencies.now??Date.now());}
       catch(e){throw new GuardError(/^NNA_(CHANNELDM|MEMBER)_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_CHANNELDM_CHECK_FAILED');}
+    }
+    if(['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage'].includes(operation)){
+      try{require('./scheduled-message').precheck(c,p,undefined,operation,dependencies.now??Date.now());}
+      catch(e){throw new GuardError(/^NNA_SCHEDMSG_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_SCHEDMSG_CHECK_FAILED');}
+    }
+    if(operation==='readGroupChats'){
+      try{require('./group-read').request(p);}
+      catch(e){throw new GuardError(/^NNA_GROUPREAD_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_GROUPREAD_CHECK_FAILED');}
+    }
+    if(operation==='readPrivateChats'){
+      try{require('./private-chats').request(p);}
+      catch(e){throw new GuardError(/^NNA_PRIVREAD_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_PRIVREAD_CHECK_FAILED');}
     }
     if(operation==='sendReplyNotice'){
       try{require('./reply-notice').precheck(c,p);}
@@ -178,6 +190,18 @@ async function runOperation(operation, rawCredentials, p = {}, dependencies = {}
     if(operation==='sendChannelMemberDirect'){
       try{return await require('./channel-member-dm').runDirect(operation,client,c,p,bounded,dependencies.now??Date.now());}
       catch(e){throw new GuardError(/^NNA_(CHANNELDM|MEMBER)_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_CHANNELDM_CHECK_FAILED');}
+    }
+    if(['sendScheduledMessage','cancelScheduledMessage','checkScheduledMessage'].includes(operation)){
+      try{return await require('./scheduled-message').run(operation,client,c,p,bounded,dependencies.now??Date.now());}
+      catch(e){throw new GuardError(/^NNA_SCHEDMSG_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_SCHEDMSG_CHECK_FAILED');}
+    }
+    if(operation==='readGroupChats'){
+      try{return await require('./group-read').run(operation,client,c,p,bounded);}
+      catch(e){throw new GuardError(/^NNA_GROUPREAD_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_GROUPREAD_READ_FAILED');}
+    }
+    if(operation==='readPrivateChats'){
+      try{return await require('./private-chats').run(operation,client,c,p,bounded);}
+      catch(e){throw new GuardError(/^NNA_PRIVREAD_[A-Z0-9_]+$/.test(e.message)?e.message:'NNA_PRIVREAD_READ_FAILED');}
     }
     if(operation==='sendReplyNotice'){
       try{return await require('./reply-notice').run(operation,client,c,p,bounded,dependencies.now??Date.now());}

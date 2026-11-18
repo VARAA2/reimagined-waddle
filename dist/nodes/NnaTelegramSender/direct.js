@@ -159,7 +159,7 @@ function parseDirectRequest(update, config, now=Date.now()) {
  const operators=operatorIds(config.allowedOperatorIds),m=update?.message;
  if(!m||update.edited_message||update.callback_query||!Number.isSafeInteger(update.update_id)||!operators.includes(m.from?.id)||m.from?.is_bot!==false||m.sender_chat)return null;
  const privateChat=m.chat?.type==='private'&&m.chat.id===m.from.id;
- const groupChat=m.chat?.type==='supergroup'&&String(m.chat.id)===String(config.reviewChatId)&&[2,3].includes(m.message_thread_id);
+ const groupChat=m.chat?.type==='supergroup'&&String(m.chat.id)===String(config.reviewChatId)&&[2,3,1121,1123].includes(m.message_thread_id); // 14 Nov 2026: topics 1121 + 1123 also take t.me link replies
  if(!privateChat&&!groupChat)return null;
  const rich=typeof m.text!=='string'&&Array.isArray(m.rich_message?.blocks);
  if(!/(?:https:\/\/)?(?:t\.me|telegram\.me)\//i.test(rich?richText(m.rich_message):typeof m.text==='string'?m.text:''))return null;

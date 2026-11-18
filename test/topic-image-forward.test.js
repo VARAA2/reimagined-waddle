@@ -31,7 +31,7 @@ function fake({photo=true,topic=TOPIC,fromId=SENDER,resolveRecipient=true,sendEr
    if(r.className==='contacts.ResolveUsername')return {users:[user(RECIPIENT)]};
    if(r.className==='messages.SendMedia'){
     if(sendError){const e=Error('x');e.errorMessage=sendError;throw e;}
-    const id=600+sent.length;sent.push({id,message:r.message,entities:r.entities,peer:r.peer,media:r.media,randomId:r.randomId});
+    const id=600+sent.length;sent.push({id,message:r.message,entities:r.entities,peer:r.peer,media:r.media,randomId:r.randomId,replyTo:r.replyTo});
     return {updates:[new Api.UpdateMessageID({id,randomId:r.randomId})]};
    }
    if(r.className==='messages.SendMultiMedia'){
@@ -130,4 +130,15 @@ test('album guards: wrong claim key, bad media group id, bad wait, refusals and 
 test('the operation waits for the rest of the album before reading it',async()=>{
  const t0=Date.now();await run(fake({album:2}),albumParams({scope:scope({albumWaitMs:150})}));assert.ok(Date.now()-t0>=140);
  const t1=Date.now();await run(fake(),params({scope:scope({albumWaitMs:2000})}));assert.ok(Date.now()-t1<1000);
+});
+test('0.53.0: destination can be a forum topic of another group (photo + same caption, reply to the topic)',async()=>{
+ const D='-1009876543',DT=1123;
+ const dscope=scope({recipientId:undefined,recipientUsername:undefined,destGroupId:D,destTopicId:DT});
+ const dkey='topic-image-forward:'+G+':'+MSG+':'+D+':'+DT;
+ const f=fake();const r=await run(f,params({scope:dscope,claimRequestKey:dkey}));
+ assert.equal(r.status,'sent');assert.equal(r.recipientId,D+':'+DT);
+ const m=f.sent[0];assert.equal(m.peer.className,'InputPeerChannel');assert.equal(String(m.peer.channelId),'9876543');
+ assert.match(m.message,/Example topic — new image/);assert.equal(m.replyTo.replyToMsgId,DT);assert.equal(m.replyTo.topMsgId,DT);
+ assert.throws(()=>require('../dist/nodes/NnaTelegramSender/topic-image-forward').scope(c,{scope:scope({destGroupId:G,destTopicId:1})}),/DEST_INVALID/);
+ assert.throws(()=>require('../dist/nodes/NnaTelegramSender/topic-image-forward').scope(c,{scope:scope({destGroupId:D,destTopicId:-1})}),/DEST_INVALID/);
 });

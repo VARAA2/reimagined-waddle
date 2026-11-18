@@ -76,12 +76,21 @@ async function sendDirectReaction(client,c,p,bounded,now=Date.now()){
  const own=rows.filter(r=>String(r.peerId?.userId)===String(c.expectedUserId)).map(r=>r.reaction).filter(reactionKey);
  const wanted=e.reaction.type==='emoji'?new Api.ReactionEmoji({emoticon:e.reaction.emoji}):new Api.ReactionCustomEmoji({documentId:bigInt(e.reaction.customEmojiId)});
  const info={requestKey:e.requestKey,operatorId:e.operatorId,senderId:String(c.expectedUserId),targetChatId:String(utils.getPeerId(group)),targetMessageId:e.target.messageId,topicId:topic,targetUrl:e.targetUrl,reaction:e.reaction};
- if(own.some(r=>reactionKey(r)===reactionKey(wanted)))return {status:'already_present',...info};
+ const has=own.some(r=>reactionKey(r)===reactionKey(wanted));
+ // Reply Desk buttons (15 Nov 2026): update.nna_reaction_mode='toggle' -> same emoji again = remove it, another emoji = replace
+ // (like tapping a reaction in Telegram). Without the flag: add only, keep every other own reaction (unchanged behaviour).
+ const toggle=p.update?.nna_reaction_mode==='toggle';
+ if(has&&!toggle)return {status:'already_present',...info};
+ const next=!toggle?[...own,wanted]:has?own.filter(r=>reactionKey(r)!==reactionKey(wanted)):[wanted];
  try{
-  await bounded(client.invoke(new Api.messages.SendReaction({peer,msgId:e.target.messageId,reaction:[...own,wanted],big:false,addToRecent:false})));
-  const after=await getReactions(client,peer,e.target.messageId,bounded);
-  need(after.some(r=>String(r.peerId?.userId)===String(c.expectedUserId)&&reactionKey(r.reaction)===reactionKey(wanted)),'NNA_REACTION_UNCONFIRMED');
-  return {status:'reacted',...info};
+  await bounded(client.invoke(new Api.messages.SendReaction({peer,msgId:e.target.messageId,reaction:next,big:false,addToRecent:false})));
+  // an empty reaction list can answer MSG_ID_INVALID, so read the fresh message summary first
+  const fresh=(await bounded(client.getMessages(peer,{ids:[e.target.messageId]})))?.[0];
+  const after=fresh?.reactions?.results?.some(r=>Number(r.count)>0)?await getReactions(client,peer,e.target.messageId,bounded):[];
+  const mine=after.filter(r=>String(r.peerId?.userId)===String(c.expectedUserId)).map(r=>reactionKey(r.reaction));
+  if(toggle&&has){need(!mine.includes(reactionKey(wanted)),'NNA_REACTION_UNCONFIRMED');return {status:'removed',...info,ownReactions:mine};}
+  need(mine.includes(reactionKey(wanted)),'NNA_REACTION_UNCONFIRMED');
+  return {status:'reacted',...info,...(toggle?{ownReactions:mine}:{})};
  }catch(error){
   const safeRpc=['REACTION_INVALID','REACTIONS_TOO_MANY','PREMIUM_ACCOUNT_REQUIRED','CHAT_WRITE_FORBIDDEN'];
   if(safeRpc.includes(error.errorMessage))throw Error('NNA_'+error.errorMessage);

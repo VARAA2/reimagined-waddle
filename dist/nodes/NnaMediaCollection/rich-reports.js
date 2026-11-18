@@ -8,25 +8,34 @@ const kindIcon = kind => kind === 'album' ? '🖼️🖼️' : kind === 'video' 
 const firstLine = s => { const t = String(s || '').split('\n').find(x => x.trim()) || ''; const a = Array.from(t.trim()); return a.length > 70 ? a.slice(0, 70).join('').replace(/\s+\S*$/, '') + '…' : a.join(''); };
 
 // ✅ media posted to a topic. topicLabel = destinations.topicLabel() ("📁 Topic" / "📁 Topic · Group").
-function receiptPage({kind = 'image', count = 1, topicLabel = '', caption = '', url = '', editData = '', edited = false, groupLabel = '#NNA'}) {
-  const topic = String(topicLabel || 'topic').replace(/\n/g, ' · ');
+// 0.58.0: topics = [{label,url}] of every topic this media went to (re-post by replying to this card adds one);
+// with 2+ topics the card names them all and has one 📄 button per topic.
+function receiptPage({kind = 'image', count = 1, topicLabel = '', caption = '', url = '', editData = '', edited = false, groupLabel = '#NNA', topics = null}) {
+  const list = (Array.isArray(topics) && topics.length ? topics : [{label: topicLabel, url}]).map(t => ({label: String(t.label || 'topic').replace(/\n/g, ' · '), url: t.url || ''}));
+  const many = list.length > 1;
+  const topic = list[0].label;
+  const names = list.map(t => `[[${t.label}]]`).join(' + ');
   const what = kind === 'album' ? `${count} media album` : kindWord(kind);
   const lines = edited ? [
     [true, `Caption : ✏️ இந்தப் பதிவின் [[caption]], [[திருத்தப்பட்டது]]! ✅`],
-    [null, `Topic : 📌 [[${topic}]] topic-ல், 📄 அதே [[பதிவு]] 👍`],
+    [null, many ? `Topics : 📌 ${names} — 📄 எல்லா [[${list.length} பதிவுகளிலும்]] 👍` : `Topic : 📌 [[${topic}]] topic-ல், 📄 அதே [[பதிவு]] 👍`],
   ] : [
-    [true, `Posted : ${kindIcon(kind)} நீங்கள் அனுப்பிய [[${what}]], 📌 [[${topic}]] topic-ல் [[பதிவிடப்பட்டது]]! 🎉`],
+    [true, many ? `Posted : ${kindIcon(kind)} நீங்கள் அனுப்பிய [[${what}]], 📌 ${names} — [[${list.length} topics]]-ல் [[பதிவிடப்பட்டது]]! 🎉` : `Posted : ${kindIcon(kind)} நீங்கள் அனுப்பிய [[${what}]], 📌 [[${topic}]] topic-ல் [[பதிவிடப்பட்டது]]! 🎉`],
     [true, `Sender : 👤 உங்கள் [[account]] மூலம், 📤 [[அப்படியே]] போனது ✨`],
   ];
   if (caption && !edited) lines.push([true, `Caption : 📝 [[caption]] + [[hashtags]], ✍️ சேர்ந்தன 👍`]);
   if (editData) lines.push([null, `Edit : ✏️ caption மாற்ற வேண்டுமா? 👇 [[Caption திருத்து]] தட்டுங்கள் 😊`]);
-  const rows = [[...(url ? [['📄 Full message', url, 'success']] : []), ...(editData ? [[edited ? '✏️ மீண்டும் திருத்து' : '✏️ Caption திருத்து', 'cb:' + editData, 'primary']] : [])]];
+  lines.push([null, `Again : 🔁 இன்னொரு topic-லும் வேண்டுமா? 👉 இந்த card-க்கு [[Reply]] செய்யுங்கள் 😊`]);
+  const short = s => { const a = Array.from(s); return a.length > 22 ? a.slice(0, 21).join('') + '…' : s; };
+  const linkButtons = many ? list.filter(t => t.url).map(t => ['📄 ' + short(t.label.split(' · ')[0].replace(/^[^\p{L}\p{N}\s]+\s+/u, '')), t.url, 'success']) : (list[0].url ? [['📄 Full message', list[0].url, 'success']] : []);
+  const editButton = editData ? [[edited ? '✏️ மீண்டும் திருத்து' : '✏️ Caption திருத்து', 'cb:' + editData, 'primary']] : [];
+  const rows = many ? [...Array.from({length: Math.ceil(linkButtons.length / 2)}, (_, i) => linkButtons.slice(i * 2, i * 2 + 2)), editButton] : [[...linkButtons, ...editButton]];
   return R.card({
     head: edited ? '✏️ Caption திருத்தப்பட்டது ✅' : '📥 Media பதிவிடப்பட்டது ✅🎉',
-    main: edited ? `✏️ CAPTION UPDATED → 📌 ${topic}` : `${kindIcon(kind)} ${kind === 'album' ? count + ' MEDIA' : '1 ' + kindWord(kind).toUpperCase()} → 📌 ${topic}`,
+    main: edited ? `✏️ CAPTION UPDATED → 📌 ${many ? list.length + ' TOPICS' : topic}` : `${kindIcon(kind)} ${kind === 'album' ? count + ' MEDIA' : '1 ' + kindWord(kind).toUpperCase()} → 📌 ${many ? list.length + ' TOPICS' : topic}`,
     citeText: R.cite('📍 ' + groupLabel),
     pre: caption ? R.sub('🏷️ ' + firstLine(caption)) : '',
-    lines, rows: rows[0].length ? rows : [],
+    lines, rows: rows.filter(r => r.length),
   });
 }
 

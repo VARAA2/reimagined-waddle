@@ -123,7 +123,13 @@ function install(Service,parseMedia){
   if(last?.owner===owner&&last.status==='sent')choices.push({button:{text:last.albumId?'✏️ கடைசி Album முதல் Caption':'✏️ கடைசி Caption திருத்து'},action:'edit:'+last.key});
   // After a post the receipt already says "posted": only swap the topic keyboard back with one short plain line,
   // not the full Media Bot card (that read as a second "posted" report for every post, 20 Oct 2026).
-  if(afterPost)return this.showKeyboard(owner,'👇 அடுத்த media அனுப்பலாம்',choices,choices.map(x=>[x.button]),{disable_notification:true},{kind:'home'});
+  if(afterPost){
+   // 0.58.0: only the newest "next media" line stays (it carries the keyboard); the previous one is deleted after it.
+   const prev=this.store.read('after_post_'+owner)?.messageId;
+   const m=await this.showKeyboard(owner,'👇 அடுத்த media அனுப்பலாம்',choices,choices.map(x=>[x.button]),{disable_notification:true},{kind:'home'});
+   if(positive(m?.message_id)){this.store.change('after_post_'+owner,()=>({messageId:m.message_id}));if(prev&&prev!==m.message_id)await this.deleteOwn(owner,[prev]).catch(()=>{});}
+   return m;
+  }
   return this.showKeyboard(owner,'📷 Image, video அல்லது 2–10 படங்கள்/வீடியோக்கள் கொண்ட Album அனுப்புங்கள்.\nTopic தேர்வு செய்ததும் @'+(this.scope.senderLabel||'personal_account')+' மூலம் பதிவிடப்படும்.\n\n✨ சுருக்கம் + Hashtags: ஒரு media-க்கு Reply செய்து /analyze அனுப்புங்கள்.',choices,choices.map(x=>[x.button]),{}, {kind:'home'},RN.home(this.scope.senderLabel));
  };
  Service.prototype.showPending=async function(owner){
@@ -135,7 +141,8 @@ function install(Service,parseMedia){
  Service.prototype.showAlbumCollecting=async function(d){
   const choices=[{button:{text:'✅ Album தயார் — Topics காட்டு'},action:'ready'},{button:{text:'❌ இந்த பதிவை ரத்து செய்'},action:'cancel'},{button:{text:'🗂 காத்திருக்கும் பதிவுகள்'},action:'pending'}];
   const m=await this.showKeyboard(d.owner,'🖼 Album பெறப்படுகிறது. எல்லா படங்கள்/வீடியோக்களும் அனுப்பி முடிந்ததும் கீழே “Album தயார்” அழுத்துங்கள்.\nஅடுத்து முழு எண்ணிக்கையும் topic பெயர்களும் காட்டப்படும்.',choices,choices.map(x=>[x.button]),{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true},{kind:'collecting',key:d.key,rev:d.rev},RN.albumCollecting(d.assets?.length));
-  this.store.change(d.key,x=>({...x,controlId:m.message_id}));
+  // 0.58.0: the "Album பெறப்படுகிறது" card is deleted with the topic question after the post.
+  this.store.change(d.key,x=>({...x,controlId:m.message_id,tidyIds:[...(x.tidyIds||[]),...(positive(m?.message_id)?[m.message_id]:[])].slice(-20)}));
  };
  Service.prototype.display=async function(d,page=0){
   if(!this.scope.replyKeyboard||d.analysisOnly)return legacy.display.call(this,d,page);
@@ -201,6 +208,8 @@ function install(Service,parseMedia){
    check(m.date>=Math.floor(ui.shownAt/1000)-1,'STALE_KEYBOARD');
    if(!target&&m.reply_to_message&&m.reply_to_message.message_id!==ui.controlId)throw Error('MEDIA_STALE_KEYBOARD');
    const action=choice.action;let d=target?target.draft:ui.key?this.store.read(ui.key):null;
+   // 0.58.0: a topic tap (and the topic question it answered) is deleted once the post succeeds.
+   if(action[0]==='t'&&d)this.tap={key:d.key,ids:[m.message_id,...(ui?.key===d.key?[ui.controlId]:[])]};
    if(action==='home'||action==='upload'||action==='help'){await this.home(owner);return {json:{next:0,status:'menu'}};}
    if(action==='pending'){await this.showPending(owner);return {json:{next:0,status:'draft_list'}};}
    if(action==='order'){await this.showOrder(owner);return {json:{next:0,status:'topic_order'}};}
@@ -211,7 +220,7 @@ function install(Service,parseMedia){
    check(d&&d.owner===owner,'STALE_KEYBOARD');
    if(d.status==='sent'&&action[0]==='t'&&(target||d.controlId===ui.controlId))return this.postCopy(d,action,u);
    if(target&&!(d.status==='analysing'&&['cancel','off'].includes(action))){const refused=await this.refuseHandled(d);if(refused)return refused;}
-   if(action==='ready')return this.readyAlbum(d);
+   if(action==='ready'){if(positive(m.message_id))this.store.change(d.key,x=>({...x,tidyIds:[...(x.tidyIds||[]),m.message_id].slice(-20)}));return this.readyAlbum(this.store.read(d.key)||d);}
    if(action==='cancel'){
     check(target||d.controlId===ui.controlId&&(d.status==='collecting'||d.rev===ui.rev),'STALE_KEYBOARD');
     this.store.change(d.key,x=>{check(x.rev===d.rev&&['collecting','pending','analysing'].includes(x.status),'ALREADY_HANDLED');return {...x,status:'cancelled',rev:x.rev+1};});
@@ -230,12 +239,27 @@ function install(Service,parseMedia){
    this.store.change('topic_order_'+owner,()=>({ids,orderRevision:this.scope.topicOrderRevision,updatedAt:Date.now()}));await this.say(owner,RN.orderSaved(),'✅ உங்களுக்கான topic வரிசை சேமிக்கப்பட்டது. அடுத்த topic தேர்வில் இந்த வரிசை வரும்.');await this.home(owner);return {json:{next:0,status:'order_saved'}};
   }
   if(/^\/(start|help|menu)(?:@\w+)?(?:\s|$)/.test(text)){await this.home(owner);return {json:{next:0,status:'menu'}};}
-  if(target&&text&&!text.startsWith('/')){const refused=target.draft.status==='sent'?null:await this.refuseHandled(target.draft);if(refused)return refused;await this.display(target.draft);return {json:{next:0,status:'draft_selected',jobKey:target.draft.key}};}
+  if(target&&text&&!text.startsWith('/')){const refused=target.draft.status==='sent'?null:await this.refuseHandled(target.draft);if(refused)return refused;
+   // 0.58.0: the owner's Reply that re-opened the topics is deleted after the next successful post of this media.
+   if(target.draft.status==='sent'&&positive(m.message_id))this.store.change(target.draft.key,x=>({...x,tidyIds:[...(x.tidyIds||[]),m.message_id].slice(-20)}));
+   await this.display(this.store.read(target.draft.key)||target.draft);return {json:{next:0,status:'draft_selected',jobKey:target.draft.key}};}
   return legacy.handle.call(this,u);
  };
  Service.prototype.publish=async function(d,topicId,groupId=this.scope.groupId){
+  const o=d.copyOf?(this.store.read(d.copyOf)||d):d,tap=this.tap?.key===o.key?this.tap.ids:[];
+  const asked=[tap,o.controlId,d.controlId,...(o.tidyIds||[])].flat();
   const result=d.albumId?await this.publishAlbum(d,topicId,groupId):await legacy.publish.call(this,d,topicId,groupId);
-  if(result.status==='sent'){this.store.change('last_sent_'+d.owner,()=>({key:d.key}));if(this.scope.replyKeyboard)await this.home(d.owner,d.key,true).catch(()=>{});}
+  if(result.status==='sent'){
+   this.store.change('last_sent_'+d.owner,()=>({key:d.key}));
+   if(this.scope.replyKeyboard){
+    await this.home(d.owner,d.key,true).catch(()=>{});
+    // 0.58.0 (owner, 14 Nov 2026): the chat keeps only the media and its one "பதிவிடப்பட்டது" card. The topic question,
+    // the owner's topic tap and a re-open Reply go (after the new keyboard is up, so the keyboard never disappears).
+    const now=this.store.read(o.key)||o,keep=new Set([now.receiptControlId,this.store.read('ui_'+d.owner)?.controlId,o.sourceMessageId,...(o.assets||[]).map(a=>a.sourceMessageId)]);
+    await this.deleteOwn(d.owner,asked.filter(id=>positive(id)&&!keep.has(id))).catch(()=>{});
+    this.store.change(o.key,x=>({...x,controlId:0,tidyIds:[]}));
+   }
+  }
   return result;
  };
  Service.prototype.publishAlbum=async function(d,topicId,groupId=this.scope.groupId){
@@ -270,9 +294,7 @@ function install(Service,parseMedia){
     confirmed=true;return {...items[0],messageIds:ids,items,groupedId,topicId,groupId,topicLabel:destinations.topicLabel(chosen,this.scope),url:'https://t.me/c/'+groupId.slice(4)+'/'+topicId+'/'+ids[0]};
    });
    this.store.change(d.key,x=>({...x,status:'sent',receipt,sentAt:Date.now()}));
-   await require('./rich-format').send(this,d.owner,require('./rich-reports').receiptPage({kind:'album',count:d.assets.length,topicLabel:receipt.topicLabel,caption:receipt.caption,url:receipt.url}),
-    {extra:{reply_parameters:{message_id:d.sourceMessageId,allow_sending_without_reply:true}},fallback:(receipt.topicLabel?receipt.topicLabel+'\n':'')+receipt.url+'\n\n✅ '+d.assets.length+' media கொண்ட முழு Album தேர்ந்தெடுத்த topic-ல் பதிவிடப்பட்டது.',
-     fallbackExtra:{reply_to_message_id:d.sourceMessageId,allow_sending_without_reply:true,disable_web_page_preview:true}}).catch(()=>{});
+   await this.sendReceipt(this.store.read(d.key)).catch(()=>{});
    return {next:0,status:'sent',jobKey:d.key,topicId,groupId,messageIds:receipt.messageIds,count:receipt.items.length};
   }catch(e){
    this.store.change(d.key,x=>({...x,status:started?'uncertain':'pending',lastError:/^MEDIA_[A-Z_]+$/.test(e.message)?e.message:'MEDIA_ALBUM_SEND_FAILED'}));

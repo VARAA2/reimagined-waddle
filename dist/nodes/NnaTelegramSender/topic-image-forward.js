@@ -13,7 +13,7 @@ const {resolveUsers}=require('./attendance-report');
 const id=v=>v==null?'':String(v);
 const check=(ok,code)=>{if(!ok)throw Error('NNA_TOPICFWD_'+code);};
 const safeId=v=>/^[1-9]\d{0,15}$/.test(id(v))&&Number.isSafeInteger(Number(v));
-const REJECTED=/^(USER_PRIVACY_RESTRICTED|USER_IS_BLOCKED|YOU_BLOCKED_USER|INPUT_USER_DEACTIVATED|USER_DEACTIVATED|USER_RESTRICTED|PEER_FLOOD|PREMIUM_ACCOUNT_REQUIRED|ALLOW_PAYMENT_REQUIRED|PRIVACY_PREMIUM_REQUIRED|CHAT_SEND_PHOTOS_FORBIDDEN|CHAT_FORWARDS_RESTRICTED)$/;
+const REJECTED=/^(USER_PRIVACY_RESTRICTED|USER_IS_BLOCKED|YOU_BLOCKED_USER|INPUT_USER_DEACTIVATED|USER_DEACTIVATED|USER_RESTRICTED|PEER_FLOOD|PREMIUM_ACCOUNT_REQUIRED|ALLOW_PAYMENT_REQUIRED|PRIVACY_PREMIUM_REQUIRED|CHAT_SEND_PHOTOS_FORBIDDEN|CHAT_FORWARDS_RESTRICTED|CHAT_WRITE_FORBIDDEN|USER_BANNED_IN_CHANNEL|TOPIC_CLOSED|TOPIC_DELETED|CHANNEL_PRIVATE)$/;
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const plain=(v,max,code)=>{check(typeof v==='string'&&v.length>0&&v.length<=max&&!/[\u0000-\u001f\u007f<>]/.test(v),code);return v;};
 const MAX_ALBUM=10,SCAN=19;
@@ -22,13 +22,18 @@ function scope(c,p){
  check(s&&typeof s==='object','SCOPE_INVALID');
  check(/^-100[1-9]\d{0,12}$/.test(s.groupId||'')&&s.groupId===c.allowedGroupId,'GROUP_NOT_ALLOWED');
  check(Number.isSafeInteger(s.topicId)&&s.topicId>0,'SCOPE_INVALID');
+ // 0.53.0: the destination can also be a forum topic of another group (destGroupId + destTopicId; 0 = General) instead of one person.
+ const dest=s.destGroupId!==undefined&&s.destGroupId!=='';
+ if(dest){check(/^-100[1-9]\d{0,12}$/.test(id(s.destGroupId))&&id(s.destGroupId)!==s.groupId,'DEST_INVALID');check(Number.isSafeInteger(s.destTopicId)&&s.destTopicId>=0,'DEST_INVALID');}
+ else{
  check(safeId(s.recipientId)&&id(s.recipientId)!==id(c.expectedUserId),'RECIPIENT_INVALID');
  check(s.recipientUsername===undefined||s.recipientUsername===''||/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(s.recipientUsername),'RECIPIENT_INVALID');
+ }
  check(typeof s.activatedAt==='string'&&Number.isFinite(Date.parse(s.activatedAt)),'ACTIVATION_INVALID');
  const maxAge=Number.isInteger(s.maxAgeMinutes)?s.maxAgeMinutes:30;check(maxAge>=1&&maxAge<=360,'MAX_AGE_INVALID');
  // Album members arrive as separate updates; the operation waits this long so that the whole album exists before it is read.
  const wait=s.albumWaitMs===undefined?4000:s.albumWaitMs;check(Number.isInteger(wait)&&wait>=0&&wait<=15000,'SCOPE_INVALID');
- return {groupId:s.groupId,topicId:s.topicId,recipientId:id(s.recipientId),recipientUsername:s.recipientUsername||'',activated:Date.parse(s.activatedAt),maxAgeMs:maxAge*60000,albumWaitMs:wait,
+ return {groupId:s.groupId,topicId:s.topicId,recipientId:dest?id(s.destGroupId)+':'+s.destTopicId:id(s.recipientId),recipientUsername:dest?'':s.recipientUsername||'',destGroupId:dest?id(s.destGroupId):'',destTopicId:dest?s.destTopicId:0,activated:Date.parse(s.activatedAt),maxAgeMs:maxAge*60000,albumWaitMs:wait,
   title:plain(s.captionTitle,120,'CAPTION_INVALID'),senderLabel:plain(s.senderLabel||'From',40,'CAPTION_INVALID')};
 }
 function eventOf(p,cfg,now){
@@ -62,6 +67,7 @@ function captionHtml(c,cfg,e,msg,from,postUrl){
  return ['🖼️ <b>'+esc(cfg.title)+'</b>','👤 '+esc(cfg.senderLabel)+': '+who,'🕒 '+esc(when),'🔗 Post: '+postUrl].join('\n');
 }
 async function recipientPeer(client,c,cfg,bounded){
+ if(cfg.destGroupId)return await groupPeer(client,cfg.destGroupId,bounded);
  const {found}=await resolveUsers(client,c,[cfg.recipientId],{[cfg.recipientId]:{name:cfg.recipientUsername}},bounded);
  let input=found.get(cfg.recipientId);
  if(!input&&cfg.recipientUsername){
@@ -110,12 +116,13 @@ async function run(operation,client,c,p,bounded,now=Date.now()){
  const rid=randomId(c.expectedUserId,e.requestKey);
  const base={requestKey:e.requestKey,recipientId:cfg.recipientId,sourceMessageId:e.messageId,senderId:id(c.expectedUserId),postUrl};
  const album=photos.length>1;
+ const replyTo=cfg.destTopicId>1?{replyTo:new Api.InputReplyToMessage({replyToMsgId:cfg.destTopicId,topMsgId:cfg.destTopicId})}:{};
  const rids=album?photos.map((_,i)=>randomId(c.expectedUserId,e.requestKey+'#'+i)):[rid];
  let result;
  try{
   result=album
-   ?await bounded(client.invoke(new Api.messages.SendMultiMedia({peer:to,multiMedia:photos.map((m,i)=>new Api.InputSingleMedia({media:photoOf(m),randomId:rids[i],message:i===0?text:'',entities:i===0?entities:[]}))})))
-   :await bounded(client.invoke(new Api.messages.SendMedia({peer:to,media:photoOf(msg),message:text,entities,randomId:rid})));
+   ?await bounded(client.invoke(new Api.messages.SendMultiMedia({peer:to,...replyTo,multiMedia:photos.map((m,i)=>new Api.InputSingleMedia({media:photoOf(m),randomId:rids[i],message:i===0?text:'',entities:i===0?entities:[]}))})))
+   :await bounded(client.invoke(new Api.messages.SendMedia({peer:to,...replyTo,media:photoOf(msg),message:text,entities,randomId:rid})));
  }
  catch(err){
   const code=err?.errorMessage||'';
