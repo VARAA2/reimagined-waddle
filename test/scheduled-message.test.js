@@ -107,7 +107,7 @@ test('0.55.0: reply to a message inside an allowed group topic',async()=>{
 test('media: allowed source group only, never rich, caption parsed',()=>{
  const sc={allowedGroupIds:['-1001234567'],allowPrivate:true,mediaSourceGroupIds:['-1002550760684']};
  const m=sm.precheck(c,{...p({media:{chatId:'-1002550760684',messageId:4321},html:'<b>Short</b> teaser'}),scope:sc}).m;
- assert.deepEqual(m.media,{chat:'-1002550760684',messageId:4321});assert.equal(m.body.text,'Short teaser');
+ assert.deepEqual(m.media,{chat:'-1002550760684',messageId:4321,messageIds:null});assert.equal(m.body.text,'Short teaser');
  assert.throws(()=>sm.precheck(c,{...p({media:{chatId:'-1009999999',messageId:1}}),scope:sc}),/MEDIA_GROUP_NOT_ALLOWED/);
  assert.throws(()=>sm.precheck(c,{...p({media:{chatId:'-1002550760684',messageId:0}}),scope:sc}),/MEDIA_MESSAGE_INVALID/);
  assert.throws(()=>sm.precheck(c,{...p({media:{chatId:'-1002550760684',messageId:5},rich:true}),scope:sc}),/MEDIA_INVALID/);
@@ -275,4 +275,52 @@ test('0.66.0: the bundled teleproto layer knows quoteRich and the rich text clas
  assert.equal(r.quoteRich.length,1);
  for(const k of ['TextPlain','TextBold','TextItalic','TextUnderline','TextStrike','InputRichMessageHTML'])assert.equal(typeof Api[k],'function',k);
  assert.equal(require('teleproto/package.json').version,require('../package.json').dependencies.teleproto);
+});
+// ---- 0.67.0 (owner 18 Nov 2026): media.messageIds = 1-5 posts -> ALL their photos/videos in ONE album ----
+const mcScope={allowedGroupIds:['-1001234567'],allowPrivate:true,mediaSourceGroupIds:['-1002550760684']};
+const mcGroup=()=>new Api.Channel({id:bigInt(2550760684),title:'MC',photo:new Api.ChatPhotoEmpty(),date:1,forum:true,megagroup:true});
+const mcPh=n=>new Api.MessageMediaPhoto({photo:new Api.Photo({id:bigInt(n),accessHash:bigInt(6),fileReference:Buffer.from([1]),date:1,sizes:[],dcId:1})});
+const mcVid=n=>new Api.MessageMediaDocument({document:new Api.Document({id:bigInt(n),accessHash:bigInt(6),fileReference:Buffer.from([1]),date:1,mimeType:'video/mp4',size:bigInt(1),dcId:1,attributes:[]})});
+const mcClient=(posts,sent)=>({invoke:async r=>{sent.push(r);if(r.className==='messages.GetScheduledHistory')return {messages:[{className:'Message',id:80}]};
+  return {className:'Updates',updates:[{className:'UpdateNewScheduledMessage',message:{id:80,entities:[]}}]};},
+ getEntity:async()=>mcGroup(),getInputEntity:async()=>new Api.InputPeerChannel({channelId:bigInt(2550760684),accessHash:bigInt(1)}),
+ getMessages:async(_,{ids})=>posts.filter(x=>ids.includes(x.id)).reverse()});
+test('0.67.0: media.messageIds validation (1-5 safe ids, first id = messageId; messageId alone still works)',()=>{
+ const pm=media=>({...p({media:{chatId:'-1002550760684',...media},html:'<b>Short</b> teaser'}),scope:mcScope});
+ const m=sm.precheck(c,pm({messageIds:[3886,'4144',3999]})).m;
+ assert.deepEqual(m.media,{chat:'-1002550760684',messageId:3886,messageIds:[3886,4144,3999]});
+ assert.deepEqual(sm.precheck(c,pm({messageId:4321})).m.media,{chat:'-1002550760684',messageId:4321,messageIds:null});
+ assert.equal(sm.precheck(c,pm({messageIds:[7]})).m.media.messageId,7);
+ for(const bad of [[],[1,2,3,4,5,6],[0],[-1],[1.5],['x'],[2147483648]])
+  assert.throws(()=>sm.precheck(c,pm({messageIds:bad})),/MEDIA_MESSAGE_INVALID/,JSON.stringify(bad));
+ assert.throws(()=>sm.precheck(c,{...p({media:{chatId:'-1009999999',messageIds:[1,2]}}),scope:mcScope}),/MEDIA_GROUP_NOT_ALLOWED/);
+});
+test('0.67.0: 3 posts (one is an album of 2) -> ONE album of 4, order kept, caption only on item 1',async()=>{
+ const g=bigInt(901);const sent=[];const now=Date.now();const at=Math.floor(now/1000)+3600;
+ const posts=[{className:'Message',id:3886,media:mcPh(1)},{className:'Message',id:4143,groupedId:g,media:mcPh(2)},{className:'Message',id:4144,groupedId:g,media:mcVid(3)},
+  {className:'Message',id:4145,media:mcPh(99)},{className:'Message',id:3999,media:mcPh(4)}];
+ const r=await sm.run('sendScheduledMessage',mcClient(posts,sent),c,{...p({media:{chatId:'-1002550760684',messageIds:[3886,4144,3999]},html:'<b>Short</b> teaser',scheduleAt:at}),scope:mcScope},x=>x,now);
+ assert.equal(r.status,'telegram_scheduled');assert.equal(r.albumCount,4);
+ const req=sent.find(x=>x.className==='messages.SendMultiMedia');assert.ok(req,'SendMultiMedia used');
+ assert.deepEqual(req.multiMedia.map(x=>x.media.id.id.toString()),['1','2','3','4']);
+ assert.equal(req.multiMedia[0].message,'Short teaser');assert.ok(req.multiMedia[0].entities.length>0);
+ assert.ok(req.multiMedia.slice(1).every(x=>x.message===''&&x.entities.length===0));
+ assert.equal(String(req.multiMedia[0].randomId),String(sm.randomId('5845920581','sm-ABC123XYZ')));
+ assert.equal(String(req.multiMedia[2].randomId),String(sm.randomId('5845920581','sm-ABC123XYZ#2')));
+ assert.equal(new Set(req.multiMedia.map(x=>x.randomId.toString())).size,4);
+ assert.equal(req.scheduleDate,at);assert.ok(!sent.some(x=>x.className==='messages.SendMedia'));
+});
+test('0.67.0: duplicates dropped, non-photo/video skipped, at most 10 items; missing post or <2 items refused',async()=>{
+ const g1=bigInt(1),g2=bigInt(2);
+ const posts=[];for(let i=0;i<6;i++)posts.push({className:'Message',id:100+i,groupedId:g1,media:mcPh(100+i)});
+ for(let i=0;i<6;i++)posts.push({className:'Message',id:200+i,groupedId:g2,media:mcPh(200+i)});
+ posts.push({className:'Message',id:300,media:new Api.MessageMediaDocument({document:new Api.Document({id:bigInt(300),accessHash:bigInt(1),fileReference:Buffer.from([1]),date:1,mimeType:'application/pdf',size:bigInt(1),dcId:1,attributes:[]})})});
+ const sent=[];
+ const r=await sm.run('sendScheduledMessage',mcClient(posts,sent),c,{...p({media:{chatId:'-1002550760684',messageIds:[101,103,300,204]},html:'x',scheduleAt:Math.floor(Date.now()/1000)+3600}),scope:mcScope},x=>x);
+ assert.equal(r.albumCount,10);
+ const req=sent.find(x=>x.className==='messages.SendMultiMedia');
+ assert.deepEqual(req.multiMedia.map(x=>Number(x.media.id.id)),[100,101,102,103,104,105,200,201,202,203]);
+ const one=[{className:'Message',id:5,media:mcPh(5)},{className:'Message',id:6,media:new Api.MessageMediaWebPage({webpage:new Api.WebPageEmpty({id:bigInt(1)})})}];
+ await assert.rejects(sm.run('sendScheduledMessage',mcClient(one,[]),c,{...p({media:{chatId:'-1002550760684',messageIds:[5,6]},html:'x'}),scope:mcScope},x=>x),/NNA_SCHEDMSG_ALBUM_INVALID/);
+ await assert.rejects(sm.run('sendScheduledMessage',mcClient(one,[]),c,{...p({media:{chatId:'-1002550760684',messageIds:[5,7]},html:'x'}),scope:mcScope},x=>x),/NNA_SCHEDMSG_MEDIA_NOT_FOUND/);
 });

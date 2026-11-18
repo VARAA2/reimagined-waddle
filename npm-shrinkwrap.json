@@ -1,12 +1,12 @@
 {
   "name": "n8n-nodes-nna-telegram-sender",
-  "version": "0.66.0",
+  "version": "0.67.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "n8n-nodes-nna-telegram-sender",
-      "version": "0.66.0",
+      "version": "0.67.0",
       "license": "MIT",
       "dependencies": {
         "big-integer": "1.6.52",

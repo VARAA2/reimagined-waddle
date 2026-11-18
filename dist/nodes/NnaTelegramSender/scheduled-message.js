@@ -95,10 +95,13 @@ function messageOf(cfg,p,c,op='sendScheduledMessage',now=Date.now()){
  }
  if(m.media!=null){
   check(typeof m.media==='object'&&m.rich!==true,'MEDIA_INVALID');
-  const mc=id(m.media.chatId).trim(),mm=Number(m.media.messageId);
+  const mc=id(m.media.chatId).trim(),mm=Number(m.media.messageId||(Array.isArray(m.media.messageIds)?m.media.messageIds[0]:0));
   check(/^-100[1-9]\d{0,12}$/.test(mc)&&(cfg.mediaGroups.includes(mc)||cfg.groups.includes(mc)),'MEDIA_GROUP_NOT_ALLOWED');
-  check(Number.isSafeInteger(mm)&&mm>0&&mm<=2147483647,'MEDIA_MESSAGE_INVALID');
-  return {schedKey:m.schedKey,chat,topic,kind,scheduleAt,replyTo,quote,quoteEntities,replyTopic,quoteOffset,media:{chat:mc,messageId:mm},body:parseHtml(m.html)};
+  // 0.67.0 (owner 18 Nov 2026): media.messageIds = 2-5 posts of the media group -> ALL their photos/videos in ONE album, one caption
+  let ids=null;if(Array.isArray(m.media.messageIds)){ids=m.media.messageIds.map(Number);check(ids.length>=1&&ids.length<=5&&ids.every(x=>Number.isSafeInteger(x)&&x>0&&x<=2147483647),'MEDIA_MESSAGE_INVALID');}
+  const mm2=ids?ids[0]:mm;
+  check(Number.isSafeInteger(mm2)&&mm2>0&&mm2<=2147483647,'MEDIA_MESSAGE_INVALID');
+  return {schedKey:m.schedKey,chat,topic,kind,scheduleAt,replyTo,quote,quoteEntities,replyTopic,quoteOffset,media:{chat:mc,messageId:mm2,messageIds:ids},body:parseHtml(m.html)};
  }
  if(m.rich===true){
   check(typeof m.html==='string'&&m.html.trim().length>0&&m.html.length<=100000,'RICH_HTML_INVALID');
@@ -202,6 +205,19 @@ async function run(operation,client,c,p,bounded,now=Date.now()){
    all.sort((a,b)=>a.id-b.id);
    check(all.length>=2&&all.length<=10&&all.every(x=>x.media&&(x.media.className==='MessageMediaPhoto'||x.media.document?.mimeType?.startsWith('video/'))),'ALBUM_INVALID');
    var album=all.map((x,i)=>new Api.InputSingleMedia({media:utils.getInputMedia(x.media),randomId:i===0?rid:randomId(c.expectedUserId,m.schedKey+'#'+i),message:i===0?m.body.text:'',entities:i===0?m.body.entities:[]}));
+  }
+  if(Array.isArray(m.media.messageIds)&&m.media.messageIds.length>1){
+   const seen=new Set(),items=[];
+   for(const mid0 of m.media.messageIds){
+    const [p0]=await bounded(client.getMessages(src,{ids:[mid0]}));
+    check(p0?.className==='Message'&&p0.media,'MEDIA_NOT_FOUND');
+    let grp=[p0];
+    if(p0.groupedId!=null){const near=[];for(let i=Math.max(1,mid0-10);i<=mid0+10;i++)near.push(i);
+     grp=(await bounded(client.getMessages(src,{ids:near}))).filter(x=>x?.className==='Message'&&x.groupedId!=null&&id(x.groupedId)===id(p0.groupedId));grp.sort((a,b)=>a.id-b.id);}
+    for(const x of grp){if(!seen.has(x.id)&&x.media&&(x.media.className==='MessageMediaPhoto'||x.media.document?.mimeType?.startsWith('video/'))){seen.add(x.id);items.push(x);}}
+   }
+   check(items.length>=2,'ALBUM_INVALID');
+   var album=items.slice(0,10).map((x,i)=>new Api.InputSingleMedia({media:utils.getInputMedia(x.media),randomId:i===0?rid:randomId(c.expectedUserId,m.schedKey+'#'+i),message:i===0?m.body.text:'',entities:i===0?m.body.entities:[]}));
   }
  }
  if(m.document){
